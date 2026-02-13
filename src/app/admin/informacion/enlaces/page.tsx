@@ -96,15 +96,15 @@ export default function AdminEnlacesPage() {
       setErrorMsg(t('adminInfoLinks.selectAssociation'));
       return;
     }
-    const t = title.trim();
-    const u = url.trim();
-    const n = note.trim();
+    const titleValue = title.trim();
+    const urlValue = url.trim();
+    const noteValue = note.trim();
 
-    if (!t) {
+    if (!titleValue) {
       setErrorMsg(t('adminInfoLinks.titleRequired'));
       return;
     }
-    if (!looksLikeUrl(u)) {
+    if (!looksLikeUrl(urlValue)) {
       setErrorMsg(t('adminInfoLinks.urlInvalid'));
       return;
     }
@@ -122,7 +122,7 @@ export default function AdminEnlacesPage() {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ association_id: currentAssociationId, title: t, url: u, note: n || null }),
+      body: JSON.stringify({ association_id: currentAssociationId, title: titleValue, url: urlValue, note: noteValue || null }),
     });
 
     const json = await res.json().catch(() => ({}));
