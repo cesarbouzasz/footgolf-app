@@ -975,17 +975,17 @@ export default function AdminEquiposPage() {
                   <div className="text-sm text-gray-500">{t('adminTeams.noTeams')}</div>
                 ) : (
                   <div className="space-y-2">
-                    {filteredTeams.map((t) => (
-                      <div key={t.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                    {filteredTeams.map((team) => (
+                      <div key={team.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2 text-sm">
                         <div className="min-w-0">
-                          <div className="font-semibold truncate">{t.name}</div>
+                          <div className="font-semibold truncate">{team.name}</div>
                           <div className="text-xs text-gray-500 truncate">
-                            {teamStatsByName.get(t.name)?.count ?? t.member_count ?? 0}/{t.max_players}
+                            {teamStatsByName.get(team.name)?.count ?? team.member_count ?? 0}/{team.max_players}
                           </div>
                         </div>
                         <button
                           type="button"
-                          onClick={() => requestDeleteTeam(t)}
+                          onClick={() => requestDeleteTeam(team)}
                           className="text-xs rounded-lg border border-red-200 text-red-700 bg-red-50 px-2 py-1 hover:bg-red-100"
                         >
                           {t('adminTeams.delete')}
