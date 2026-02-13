@@ -193,6 +193,9 @@ export default function BirdyChat() {
   const [eventsLoaded, setEventsLoaded] = useState(false);
   const [eventsLoading, setEventsLoading] = useState(false);
 
+  const [gameModesText, setGameModesText] = useState<string | null>(null);
+  const [gameModesLoading, setGameModesLoading] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -301,6 +304,24 @@ export default function BirdyChat() {
     }
   };
 
+  const loadGameModesOnce = async () => {
+    if (gameModesText || gameModesLoading) return;
+    setGameModesLoading(true);
+    try {
+      const res = await fetch('/birdy_game_modes.md');
+      if (!res.ok) {
+        setGameModesText(null);
+        return;
+      }
+      const text = await res.text();
+      setGameModesText(text.trim() || null);
+    } catch {
+      setGameModesText(null);
+    } finally {
+      setGameModesLoading(false);
+    }
+  };
+
   const coursesByNormName = useMemo(() => {
     const map = new Map<string, CourseRulesRow>();
     for (const c of courses) {
@@ -374,6 +395,22 @@ export default function BirdyChat() {
       norm.includes('app')
     ) {
       pushBot(t('birdy.appSummary'));
+      return;
+    }
+
+    if (
+      norm.includes('modo de juego') ||
+      norm.includes('modos de juego') ||
+      norm.includes('modalidad') ||
+      norm.includes('modalidades') ||
+      norm.includes('formatos de juego')
+    ) {
+      await loadGameModesOnce();
+      if (gameModesText) {
+        pushBot(gameModesText);
+      } else {
+        pushBot(t('birdy.appSummary'));
+      }
       return;
     }
 
