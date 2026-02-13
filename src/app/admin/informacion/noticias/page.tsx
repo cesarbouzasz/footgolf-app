@@ -171,14 +171,14 @@ export default function AdminNoticiasPage() {
       return;
     }
 
-    const t = title.trim();
-    const b = body.trim();
+    const titleValue = title.trim();
+    const bodyValue = body.trim();
 
-    if (!t) {
+    if (!titleValue) {
       setErrorMsg(t('adminInfoNews.titleRequired'));
       return;
     }
-    if (!b) {
+    if (!bodyValue) {
       setErrorMsg(t('adminInfoNews.bodyRequired'));
       return;
     }
@@ -192,8 +192,8 @@ export default function AdminNoticiasPage() {
 
     const fd = new FormData();
     fd.set('association_id', currentAssociationId);
-    fd.set('title', t);
-    fd.set('body', b);
+    fd.set('title', titleValue);
+    fd.set('body', bodyValue);
     if (imageFile) fd.set('image', imageFile);
 
     const res = await fetch('/api/admin/info/news', {
