@@ -898,10 +898,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         },
       });
 
-      const prevEvents = new Set(
-        Array.isArray(prevHub?.events) ? prevHub.events.map((e: any) => String(e?.eventId || '')).filter(Boolean) : []
+      const prevEvents = new Set<string>(
+        Array.isArray(prevHub?.events)
+          ? prevHub.events.map((e: any) => String(e?.eventId || '')).filter(Boolean)
+          : []
       );
-      const nextEvents = new Set(normalizedChampHub.events.map((e) => e.eventId));
+      const nextEvents = new Set<string>(normalizedChampHub.events.map((e) => e.eventId));
       const eventHistory = Array.isArray(prevHub?.eventHistory) ? [...prevHub.eventHistory] : [];
       normalizedChampHub.events.forEach((entry) => {
         if (!prevEvents.has(entry.eventId)) {
