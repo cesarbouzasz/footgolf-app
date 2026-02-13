@@ -1,0 +1,16 @@
+column_name,data_type
+id,uuid
+name,text
+status,text
+competition_mode,text
+registration_start,date
+registration_end,date
+event_date,date
+course_id,uuid
+config,jsonb
+registered_player_ids,ARRAY
+created_by,uuid
+has_handicap_ranking,boolean
+points_config,jsonb
+tie_break_type,text
+tie_break_manual_limit,integer

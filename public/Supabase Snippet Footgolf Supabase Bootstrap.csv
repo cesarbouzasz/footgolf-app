@@ -1,0 +1,22 @@
+ordinal_position,column_name,data_type
+1,id,uuid
+2,email,text
+3,username,text
+4,full_name,text
+5,avatar_url,text
+6,role,text
+7,preferred_language,text
+8,handicap,double precision
+9,team,text
+10,created_at,timestamp with time zone
+11,current_group_id,uuid
+12,updated_at,timestamp with time zone
+13,chatbot_enabled,boolean
+14,is_admin,boolean
+15,admin_level,text
+16,first_name,text
+17,last_name,text
+18,association_id,uuid
+19,category,text
+20,birth_year,integer
+21,country,text
