@@ -287,6 +287,8 @@ export const PT = {
     delete: "Deletar",
     edit: "Editar",
     close: "Fechar",
+    showPassword: "Mostrar senha",
+    hidePassword: "Ocultar senha",
     notAvailable: "N/A",
     association: "Associacao",
     season2026: "Temporada 2026",

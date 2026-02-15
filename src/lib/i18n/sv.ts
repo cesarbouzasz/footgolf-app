@@ -227,6 +227,8 @@ export const SV = {
     delete: "Radera",
     edit: "Redigera",
     close: "Stäng",
+    showPassword: "Visa losenord",
+    hidePassword: "Dolj losenord",
     notAvailable: "N/A",
     association: "Förening",
     season2026: "Säsong 2026",

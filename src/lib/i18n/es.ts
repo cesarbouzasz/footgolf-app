@@ -286,6 +286,8 @@ export const ES = {
     delete: "Eliminar",
     edit: "Editar",
     close: "Cerrar",
+    showPassword: "Mostrar contraseña",
+    hidePassword: "Ocultar contraseña",
     notAvailable: "N/A",
     association: "Asociacion",
     season2026: "Temporada 2026",

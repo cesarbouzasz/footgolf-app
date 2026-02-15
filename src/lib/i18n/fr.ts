@@ -287,6 +287,8 @@ export const FR = {
     delete: "Supprimer",
     edit: "Modifier",
     close: "Fermer",
+    showPassword: "Afficher le mot de passe",
+    hidePassword: "Masquer le mot de passe",
     notAvailable: "N/A",
     association: "Association",
     season2026: "Saison 2026",

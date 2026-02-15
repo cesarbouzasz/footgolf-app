@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Mail, Lock, User, AlertCircle, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Mail, Lock, User, AlertCircle, ArrowLeft, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/language-context';
@@ -142,6 +142,8 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
@@ -432,25 +434,41 @@ export default function SignupPage() {
           <div className="relative group">
             <Lock className="absolute left-2 top-1/2 -translate-y-1/2 text-[#bef264]/60 group-focus-within:text-[#bef264] transition-colors" size={14} />
             <input 
-              type="password" 
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t('signup.fields.password')}
               disabled={loading}
-              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-9 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs placeholder:text-white/40 rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
+              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-9 pr-8 text-white outline-none transition-all duration-300 font-bold italic text-xs placeholder:text-white/40 rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[#bef264]/70 hover:text-[#bef264]"
+              aria-label={showPassword ? t('common.hidePassword') : t('common.showPassword')}
+            >
+              {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
           </div>
 
           <div className="relative group">
             <Lock className="absolute left-2 top-1/2 -translate-y-1/2 text-[#bef264]/60 group-focus-within:text-[#bef264] transition-colors" size={14} />
             <input 
-              type="password" 
+              type={showConfirmPassword ? 'text' : 'password'}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder={t('signup.fields.confirmPassword')}
               disabled={loading}
-              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-9 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs placeholder:text-white/40 rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
+              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-9 pr-8 text-white outline-none transition-all duration-300 font-bold italic text-xs placeholder:text-white/40 rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
             />
+            <button
+              type="button"
+              onClick={() => setShowConfirmPassword((prev) => !prev)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[#bef264]/70 hover:text-[#bef264]"
+              aria-label={showConfirmPassword ? t('common.hidePassword') : t('common.showPassword')}
+            >
+              {showConfirmPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
           </div>
 
           {/* BOTÓN PRINCIPAL */}

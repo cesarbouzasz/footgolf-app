@@ -53,6 +53,8 @@ export const TR = {
     settings: "Ayarlar",
     edit: "Düzenle",
     logout: "Çıkış Yap",
+    showPassword: "Sifreyi goster",
+    hidePassword: "Sifreyi gizle",
   },
   // Events
   events: {

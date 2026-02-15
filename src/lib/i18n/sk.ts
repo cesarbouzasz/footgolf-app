@@ -53,6 +53,8 @@ export const SK = {
     settings: "Nastavenia",
     edit: "Upraviť",
     logout: "Odhlásiť sa",
+    showPassword: "Zobrazit heslo",
+    hidePassword: "Skryt heslo",
   },
   // Events
   events: {

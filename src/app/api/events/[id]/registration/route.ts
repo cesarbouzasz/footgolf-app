@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { sendEmail } from '@/lib/email';
 
 export const runtime = 'nodejs';
 
@@ -57,6 +58,51 @@ function toDate(value?: string | null) {
   if (!value) return null;
   const d = new Date(value);
   return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function formatDateLabel(value?: string | null) {
+  if (!value) return 'Sin fecha';
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return 'Sin fecha';
+  return d.toLocaleDateString('es-ES');
+}
+
+function getSiteUrl() {
+  return process.env.NEXT_PUBLIC_SITE_URL || 'https://footgolf-app.vercel.app';
+}
+
+async function sendRegistrationEmail(params: {
+  to: string;
+  eventName: string;
+  eventId: string;
+  eventDate?: string | null;
+  registrationStart?: string | null;
+  registrationEnd?: string | null;
+  status: 'registered' | 'waitlist';
+}) {
+  const eventDateLabel = formatDateLabel(params.eventDate);
+  const regStartLabel = formatDateLabel(params.registrationStart);
+  const regEndLabel = formatDateLabel(params.registrationEnd);
+  const siteUrl = getSiteUrl();
+  const eventUrl = `${siteUrl}/events/${params.eventId}`;
+  const isWaitlist = params.status === 'waitlist';
+
+  const subject = isWaitlist
+    ? `Lista de espera: ${params.eventName}`
+    : `Inscripcion confirmada: ${params.eventName}`;
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111;">
+      <h2 style="margin: 0 0 12px 0;">${isWaitlist ? 'Lista de espera' : 'Inscripcion confirmada'}</h2>
+      <p>Evento: <strong>${params.eventName}</strong></p>
+      <p>Fecha del evento: <strong>${eventDateLabel}</strong></p>
+      <p>Inscripciones: <strong>${regStartLabel}</strong> a <strong>${regEndLabel}</strong></p>
+      <p>${isWaitlist ? 'Estas en lista de espera. Te avisaremos si se libera plaza.' : 'Tu inscripcion esta confirmada.'}</p>
+      <p>Detalles: <a href="${eventUrl}">${eventUrl}</a></p>
+    </div>
+  `;
+
+  await sendEmail({ to: params.to, subject, html });
 }
 
 async function safeAdminMessage(params: {
@@ -257,6 +303,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         playerId: user.id,
         message: `Cupo completo. Estás en lista de espera para "${String(eventRow.name || 'Evento')}".`,
       });
+
+      if (user.email) {
+        await sendRegistrationEmail({
+          to: user.email,
+          eventName: String(eventRow.name || 'Evento'),
+          eventId,
+          eventDate: eventRow.event_date || null,
+          registrationStart: eventRow.registration_start || null,
+          registrationEnd: eventRow.registration_end || null,
+          status: 'waitlist',
+        });
+      }
     } else {
       void safeAdminMessage({
         associationId,
@@ -269,6 +327,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         playerId: user.id,
         message: `Inscripción confirmada en "${String(eventRow.name || 'Evento')}".`,
       });
+
+      if (user.email) {
+        await sendRegistrationEmail({
+          to: user.email,
+          eventName: String(eventRow.name || 'Evento'),
+          eventId,
+          eventDate: eventRow.event_date || null,
+          registrationStart: eventRow.registration_start || null,
+          registrationEnd: eventRow.registration_end || null,
+          status: 'registered',
+        });
+      }
     }
 
     return NextResponse.json(

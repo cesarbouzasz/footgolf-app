@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { sendEmail } from '@/lib/email';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +16,100 @@ function isPlainObject(value: unknown): value is Record<string, any> {
 
 function isIsoDate(value: unknown) {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function formatDateLabel(value?: string | null) {
+  if (!value) return 'Sin fecha';
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return 'Sin fecha';
+  return d.toLocaleDateString('es-ES');
+}
+
+function formatDateList(values: any) {
+  if (!Array.isArray(values) || values.length === 0) return 'Sin fechas';
+  return values.map((d) => formatDateLabel(String(d || ''))).join(', ');
+}
+
+function getSiteUrl() {
+  return process.env.NEXT_PUBLIC_SITE_URL || 'https://footgolf-app.vercel.app';
+}
+
+async function getEmailsForUsers(userIds: string[]) {
+  const emails: string[] = [];
+  for (const userId of userIds) {
+    try {
+      const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
+      const email = data?.user?.email || null;
+      if (email) emails.push(email);
+    } catch {
+      // ignore
+    }
+  }
+  return emails;
+}
+
+function buildDrawEmailHtml(params: {
+  eventName: string;
+  eventId: string;
+  eventDate?: string | null;
+  config: any;
+  bracketChanged: boolean;
+  scheduleChanged: boolean;
+}) {
+  const siteUrl = getSiteUrl();
+  const eventUrl = `${siteUrl}/events/${params.eventId}`;
+  const datesLabel = formatDateLabel(params.eventDate);
+  const groupDates = formatDateList(params.config?.groupDates);
+  const matchesPerDay = params.config?.groupMatchesPerDay ? String(params.config.groupMatchesPerDay) : 'No definido';
+  const groupCount = params.config?.groupCount ? String(params.config.groupCount) : 'No definido';
+  const groupAdvance = params.config?.groupAdvanceCount ? String(params.config.groupAdvanceCount) : 'No definido';
+
+  const firstRound = params.config?.mainBracket?.rounds?.[0];
+  const firstRoundName = String(firstRound?.name || 'Primera ronda');
+  const firstRoundMatches = Array.isArray(firstRound?.matches)
+    ? firstRound.matches
+        .map((m: any) => {
+          const a = String(m?.p1 || '').trim() || 'N/A';
+          const b = String(m?.p2 || '').trim() || 'N/A';
+          return `${a} vs ${b}`;
+        })
+        .filter(Boolean)
+    : [];
+
+  const bracketInfo = params.bracketChanged
+    ? `
+      <p>El sorteo de cruces ya esta publicado.</p>
+      ${firstRoundMatches.length > 0
+        ? `
+          <div>
+            <strong>${firstRoundName}:</strong>
+            <ul>
+              ${firstRoundMatches.map((m: string) => `<li>${m}</li>`).join('')}
+            </ul>
+          </div>
+        `
+        : ''}
+    `
+    : '';
+  const scheduleInfo = params.scheduleChanged
+    ? `
+      <p><strong>Fechas de grupos:</strong> ${groupDates}</p>
+      <p><strong>Partidos por dia:</strong> ${matchesPerDay}</p>
+      <p><strong>Grupos:</strong> ${groupCount}</p>
+      <p><strong>Clasifican por grupo:</strong> ${groupAdvance}</p>
+    `
+    : '';
+
+  return `
+    <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111;">
+      <h2 style="margin: 0 0 12px 0;">Sorteo y horarios publicados</h2>
+      <p>Evento: <strong>${params.eventName}</strong></p>
+      <p>Fecha del evento: <strong>${datesLabel}</strong></p>
+      ${bracketInfo}
+      ${scheduleInfo}
+      <p>Revisa los detalles completos aqui: <a href="${eventUrl}">${eventUrl}</a></p>
+    </div>
+  `;
 }
 
 function normalizeMode(value: unknown) {
@@ -730,6 +825,29 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 
     const config = { ...existingConfig, ...incomingConfig };
 
+    const prevBracket = (existingConfig as any)?.mainBracket || null;
+    const nextBracket = (config as any)?.mainBracket || null;
+    const bracketChanged =
+      JSON.stringify(prevBracket) !== JSON.stringify(nextBracket) &&
+      Array.isArray((nextBracket as any)?.rounds) &&
+      (nextBracket as any)?.rounds?.length > 0;
+
+    const prevSchedule = {
+      groupDates: (existingConfig as any)?.groupDates || null,
+      groupMatchesPerDay: (existingConfig as any)?.groupMatchesPerDay || null,
+      groupCount: (existingConfig as any)?.groupCount || null,
+      groupAdvanceCount: (existingConfig as any)?.groupAdvanceCount || null,
+    };
+    const nextSchedule = {
+      groupDates: (config as any)?.groupDates || null,
+      groupMatchesPerDay: (config as any)?.groupMatchesPerDay || null,
+      groupCount: (config as any)?.groupCount || null,
+      groupAdvanceCount: (config as any)?.groupAdvanceCount || null,
+    };
+    const scheduleChanged =
+      JSON.stringify(prevSchedule) !== JSON.stringify(nextSchedule) &&
+      (Array.isArray(nextSchedule.groupDates) || nextSchedule.groupMatchesPerDay || nextSchedule.groupCount);
+
     const maxPlayers = (config as any)?.maxPlayers;
     if (maxPlayers != null) {
       if (!Number.isInteger(maxPlayers) || !Number.isFinite(maxPlayers) || maxPlayers < 2 || maxPlayers > 256) {
@@ -960,6 +1078,37 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 
     const { error } = await supabaseAdmin.from('events').update(updateRow).eq('id', eventId);
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 200 });
+
+    if (bracketChanged || scheduleChanged) {
+      const { data: eventRow } = await supabaseAdmin
+        .from('events')
+        .select('registered_player_ids')
+        .eq('id', eventId)
+        .maybeSingle();
+
+      const registeredIds = normalizeIdArray((eventRow as any)?.registered_player_ids);
+      const emails = await getEmailsForUsers(registeredIds);
+      if (emails.length > 0) {
+        const to = process.env.SMTP_FROM || process.env.SMTP_USER || '';
+        if (!to) {
+          return NextResponse.json({ ok: true }, { status: 200 });
+        }
+        const subject = scheduleChanged && bracketChanged
+          ? `Sorteo y horarios: ${name}`
+          : bracketChanged
+            ? `Sorteo publicado: ${name}`
+            : `Horarios publicados: ${name}`;
+        const html = buildDrawEmailHtml({
+          eventName: name,
+          eventId,
+          eventDate: eventDate ? String(eventDate) : null,
+          config,
+          bracketChanged,
+          scheduleChanged,
+        });
+        await sendEmail({ to, bcc: emails, subject, html });
+      }
+    }
 
     if (finalChanged || lockedChanged) {
       const action: 'update' | 'lock' | 'unlock' =

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/auth-context';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/language-context';
@@ -11,6 +11,7 @@ import { useLanguage } from '@/context/language-context';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -110,15 +111,23 @@ export default function LoginPage() {
                 />
               </div>
 
-              <div>
+              <div className="relative">
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full border-b border-white/45 bg-transparent px-1 py-2.5 text-white placeholder-white/65 outline-none transition focus:border-amber-300"
+                  className="w-full border-b border-white/45 bg-transparent px-1 py-2.5 pr-10 text-white placeholder-white/65 outline-none transition focus:border-amber-300"
                   placeholder={t('login.passwordPlaceholder')}
                   disabled={loading}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-white/70 hover:text-white"
+                  aria-label={showPassword ? t('common.hidePassword') : t('common.showPassword')}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
 
               <div className="flex items-center justify-between text-xs text-white/75">

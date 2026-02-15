@@ -287,6 +287,8 @@ export const EN = {
     delete: "Delete",
     edit: "Edit",
     close: "Close",
+    showPassword: "Show password",
+    hidePassword: "Hide password",
     notAvailable: "N/A",
     association: "Association",
     season2026: "Season 2026",

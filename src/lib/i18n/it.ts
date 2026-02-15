@@ -227,6 +227,8 @@ export const IT = {
     delete: "Elimina",
     edit: "Modifica",
     close: "Chiudi",
+    showPassword: "Mostra password",
+    hidePassword: "Nascondi password",
     notAvailable: "N/A",
     association: "Associazione",
     season2026: "Stagione 2026",
