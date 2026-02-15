@@ -14,7 +14,6 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [team, setTeam] = useState('');
   const [phone, setPhone] = useState('');
   const [birthYear, setBirthYear] = useState('');
   const [category, setCategory] = useState('');
@@ -81,7 +80,6 @@ export default function SignupPage() {
           id: data.user.id,
           first_name: firstName.trim() || null,
           last_name: lastName.trim() || null,
-          team: team.trim() || null,
           phone: phone.trim() || null,
           birth_year: birthYear ? Number(birthYear) : null,
           category: category || null,
@@ -192,18 +190,6 @@ export default function SignupPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder={t('signup.fields.email')}
-              disabled={loading}
-              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-9 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs placeholder:text-white/40 rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
-            />
-          </div>
-
-          <div className="relative group">
-            <User className="absolute left-2 top-1/2 -translate-y-1/2 text-[#bef264]/60 group-focus-within:text-[#bef264] transition-colors" size={14} />
-            <input 
-              type="text" 
-              value={team}
-              onChange={(e) => setTeam(e.target.value)}
-              placeholder={t('signup.fields.team')}
               disabled={loading}
               className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-9 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs placeholder:text-white/40 rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
             />
