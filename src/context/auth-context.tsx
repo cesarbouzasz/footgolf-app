@@ -101,6 +101,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const sessionRes = await supabase.auth.getSession();
       const token = sessionRes?.data?.session?.access_token;
       const sessionEmail = (sessionRes?.data?.session?.user?.email || '').trim().toLowerCase();
+      const sessionUser = sessionRes?.data?.session?.user || null;
 
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
 
@@ -109,7 +110,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         headers,
       });
       const json = await res.json().catch(() => null);
-      const data = json?.profile ?? null;
+      let data = json?.profile ?? null;
+
+      if ((!data || data.id !== userId) && headers && sessionUser) {
+        const meta = (sessionUser.user_metadata || {}) as Record<string, any>;
+        const bootstrap: Record<string, any> = {};
+        const allowed = ['first_name', 'last_name', 'phone', 'birth_year', 'category', 'country', 'region', 'province'];
+        for (const key of allowed) {
+          if (key in meta) bootstrap[key] = meta[key];
+        }
+        const hasBootstrap = Object.values(bootstrap).some((value) => {
+          if (value === null || value === undefined) return false;
+          if (typeof value === 'string') return value.trim().length > 0;
+          return true;
+        });
+
+        if (hasBootstrap) {
+          await fetch('/api/profile/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify(bootstrap),
+          }).catch(() => null);
+
+          const res2 = await fetch('/api/profile/me', { method: 'GET', headers });
+          const json2 = await res2.json().catch(() => null);
+          data = json2?.profile ?? null;
+        }
+      }
 
       if (!data || data.id !== userId) {
         setProfile(null);
@@ -149,7 +176,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const roleRaw = (data as any)?.role;
         const normalizedRole = typeof roleRaw === 'string' ? roleRaw.trim().toLowerCase() : '';
         if (normalizedRole === 'admin') {
-          const sessionUser = sessionRes?.data?.session?.user || null;
           const handle = getUserHandle(sessionUser);
           const derivedAssociationId = await resolveAssociationIdFromHandle(handle);
           if (derivedAssociationId) setCurrentAssociationId(derivedAssociationId);

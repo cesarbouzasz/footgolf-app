@@ -195,8 +195,14 @@ export default function SignupPage() {
         options: {
           emailRedirectTo: `${siteUrl}/login`,
           data: {
-            first_name: firstName,
-            last_name: lastName,
+            first_name: firstName.trim() || null,
+            last_name: lastName.trim() || null,
+            phone: phone.trim() || null,
+            birth_year: birthYear ? Number(birthYear) : null,
+            category: category || null,
+            country: country || null,
+            region: region || null,
+            province: province || null,
           },
         },
       });
