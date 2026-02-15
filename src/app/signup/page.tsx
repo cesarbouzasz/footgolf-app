@@ -8,6 +8,136 @@ import Image from 'next/image';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/language-context';
 
+const COMMON_COUNTRIES = [
+  'Espana',
+  'Portugal',
+  'Francia',
+  'Italia',
+  'Alemania',
+  'Reino Unido',
+  'Irlanda',
+  'Belgica',
+  'Paises Bajos',
+  'Suiza',
+  'Austria',
+  'Suecia',
+  'Noruega',
+  'Dinamarca',
+  'Finlandia',
+  'Polonia',
+  'Republica Checa',
+  'Hungria',
+  'Grecia',
+  'Rumania',
+  'Estados Unidos',
+  'Canada',
+  'Mexico',
+  'Argentina',
+  'Uruguay',
+  'Chile',
+  'Peru',
+  'Colombia',
+  'Ecuador',
+  'Venezuela',
+  'Brasil',
+  'Paraguay',
+  'Bolivia',
+  'Republica Dominicana',
+  'Cuba',
+  'Costa Rica',
+  'Panama',
+  'Guatemala',
+  'Honduras',
+  'El Salvador',
+  'Nicaragua',
+  'Australia',
+  'Nueva Zelanda',
+  'Japon',
+  'China',
+  'Corea del Sur',
+  'India',
+  'Sudafrica',
+  'Marruecos',
+  'Egipto',
+];
+
+const SPANISH_REGIONS = [
+  'Andalucia',
+  'Aragon',
+  'Asturias',
+  'Illes Balears',
+  'Canarias',
+  'Cantabria',
+  'Castilla-La Mancha',
+  'Castilla y Leon',
+  'Cataluna',
+  'Comunitat Valenciana',
+  'Extremadura',
+  'Galicia',
+  'La Rioja',
+  'Comunidad de Madrid',
+  'Region de Murcia',
+  'Comunidad Foral de Navarra',
+  'Pais Vasco',
+  'Ceuta',
+  'Melilla',
+];
+
+const SPANISH_PROVINCES = [
+  'Alava',
+  'Albacete',
+  'Alicante',
+  'Almeria',
+  'Asturias',
+  'Avila',
+  'Badajoz',
+  'Illes Balears',
+  'Barcelona',
+  'Burgos',
+  'Caceres',
+  'Cadiz',
+  'Cantabria',
+  'Castellon',
+  'Ciudad Real',
+  'Cordoba',
+  'A Coruna',
+  'Cuenca',
+  'Girona',
+  'Granada',
+  'Guadalajara',
+  'Gipuzkoa',
+  'Huelva',
+  'Huesca',
+  'Jaen',
+  'Leon',
+  'Lleida',
+  'Lugo',
+  'Madrid',
+  'Malaga',
+  'Murcia',
+  'Navarra',
+  'Ourense',
+  'Palencia',
+  'Las Palmas',
+  'Pontevedra',
+  'La Rioja',
+  'Salamanca',
+  'Santa Cruz de Tenerife',
+  'Segovia',
+  'Sevilla',
+  'Soria',
+  'Tarragona',
+  'Teruel',
+  'Toledo',
+  'Valencia',
+  'Valladolid',
+  'Bizkaia',
+  'Zamora',
+  'Zaragoza',
+  'Ceuta',
+  'Melilla',
+];
+
 export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -17,7 +147,7 @@ export default function SignupPage() {
   const [phone, setPhone] = useState('');
   const [birthYear, setBirthYear] = useState('');
   const [category, setCategory] = useState('');
-  const [country, setCountry] = useState('');
+  const [country, setCountry] = useState('Espana');
   const [region, setRegion] = useState('');
   const [province, setProvince] = useState('');
   const [error, setError] = useState('');
@@ -238,36 +368,45 @@ export default function SignupPage() {
           </div>
 
           <div className="relative group">
-            <input 
-              type="text" 
+            <select
               value={country}
               onChange={(e) => setCountry(e.target.value)}
-              placeholder={t('signup.fields.country')}
               disabled={loading}
-              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs placeholder:text-white/40 rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
-            />
+              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
+            >
+              <option value="">{t('signup.fields.country')}</option>
+              {COMMON_COUNTRIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
           </div>
 
           <div className="relative group">
-            <input 
-              type="text" 
+            <select
               value={region}
               onChange={(e) => setRegion(e.target.value)}
-              placeholder={t('signup.fields.region')}
               disabled={loading}
-              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs placeholder:text-white/40 rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
-            />
+              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
+            >
+              <option value="">{t('signup.fields.region')}</option>
+              {SPANISH_REGIONS.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
           </div>
 
           <div className="relative group">
-            <input 
-              type="text" 
+            <select
               value={province}
               onChange={(e) => setProvince(e.target.value)}
-              placeholder={t('signup.fields.province')}
               disabled={loading}
-              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs placeholder:text-white/40 rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
-            />
+              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
+            >
+              <option value="">{t('signup.fields.province')}</option>
+              {SPANISH_PROVINCES.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
           </div>
 
           <div className="relative group">
