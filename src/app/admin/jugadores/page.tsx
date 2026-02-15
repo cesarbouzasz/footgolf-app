@@ -18,11 +18,6 @@ interface PlayerRow {
   events_played_last_year?: number | null;
 }
 
-function shortId(id: string) {
-  const clean = (id || '').replace(/-/g, '');
-  return clean ? clean.slice(0, 8).toUpperCase() : '—';
-}
-
 export default function AdminPlayersPage() {
   const { user, profile, loading, isAdmin, currentAssociationId } = useAuth();
   const { t } = useLanguage();
@@ -190,7 +185,7 @@ export default function AdminPlayersPage() {
 
             <div className="border border-white/70 rounded-2xl bg-white/90 overflow-hidden shadow-sm">
               <div className="overflow-x-auto">
-                <table className="min-w-[920px] w-full text-sm">
+                <table className="min-w-[980px] w-full text-sm">
                   <thead>
                     <tr className="text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-200 bg-white/80">
                       <th className="text-left font-semibold px-4 py-3">ID</th>
@@ -221,7 +216,7 @@ export default function AdminPlayersPage() {
                         <tr key={p.id} className="border-b border-gray-100/80 hover:bg-slate-50/60 transition-colors">
                           <td className="px-4 py-3">
                             <span className="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-gray-800">
-                              {shortId(p.id)}
+                              {p.id}
                             </span>
                           </td>
                           <td className="px-4 py-3 font-semibold text-gray-900">{p.first_name || '—'}</td>
