@@ -132,6 +132,22 @@ body.premium-admin-bg {
   cursor: not-allowed;
   background: rgba(255, 255, 255, 0.65);
 }
+
+@media (max-width: 640px) {
+  .premium-field {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+  .premium-field > span {
+    min-width: 0;
+  }
+  .premium-field input,
+  .premium-field select,
+  .premium-field textarea {
+    width: 100%;
+  }
+}
 .premium-select-flag {
   width: 1.3em;
   height: 1.3em;
