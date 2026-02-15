@@ -89,6 +89,9 @@ const SPANISH_PROVINCES = [
   'Melilla',
 ];
 
+const formatCountryLabel = (value: string) => (value === 'Espana' ? 'España' : value);
+const normalizeCountryInput = (value: string) => (value === 'España' ? 'Espana' : value);
+
 export default function ProfilePage() {
   const { user, profile, loading, signOut, isGuest, setCurrentAssociationId, refreshProfile } = useAuth();
   const { t } = useLanguage();
@@ -566,7 +569,7 @@ export default function ProfilePage() {
               <input className="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-gray-50" value={(profile as any)?.role || ''} disabled readOnly />
             </div>
             <div className="premium-field"><FaUsers className="premium-field-icon" /> <span>{t('profilePage.fields.team')}:</span>
-              <input className="w-full border border-gray-300 rounded px-3 py-2 text-sm" value={team} onChange={e=>setTeam(e.target.value)} placeholder={t('profilePage.placeholders.team')} />
+              <input className="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-gray-50" value={team} disabled readOnly />
             </div>
             <div className="premium-field"><FaPhone className="premium-field-icon" /> <span>{t('profilePage.fields.phone')}:</span>
               <input className="w-full border border-gray-300 rounded px-3 py-2 text-sm" value={phone} onChange={e=>setPhone(e.target.value)} placeholder={t('profilePage.placeholders.phone')} />
@@ -575,7 +578,12 @@ export default function ProfilePage() {
               <input className="w-full border border-gray-300 rounded px-3 py-2 text-sm" value={birthYear} onChange={e=>setBirthYear(e.target.value)} type="number" placeholder={t('profilePage.placeholders.birthYear')} />
             </div>
             <div className="premium-field"><FaFlag className="premium-field-icon" /> <span>{t('profilePage.fields.country')}:</span>
-              <input className="w-full border border-gray-300 rounded px-3 py-2 text-sm" value={country} onChange={e=>setCountry(e.target.value)} placeholder={t('profilePage.placeholders.country')} />
+              <input
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                value={formatCountryLabel(country)}
+                onChange={(e) => setCountry(normalizeCountryInput(e.target.value))}
+                placeholder={t('profilePage.placeholders.country')}
+              />
             </div>
             <div className="premium-field"><FaGlobe className="premium-field-icon" /> <span>{t('profilePage.fields.region')}:</span>
               <select
