@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     let query = supabaseAdmin
       .from('profiles')
       .select('id, first_name, last_name, category, birth_year, team, association_id, province')
-      .or('role.eq.usuario,role.is.null');
+      .or('role.eq.usuario,role.eq.jugador,role.is.null');
 
     if (associationId) {
       query = query.eq('association_id', associationId);
