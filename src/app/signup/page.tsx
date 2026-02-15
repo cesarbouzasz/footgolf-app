@@ -382,9 +382,12 @@ export default function SignupPage() {
               className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
             >
               <option value="">{t('signup.fields.country')}</option>
-              {COMMON_COUNTRIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
+              {COMMON_COUNTRIES.map((c) => {
+                const label = c === 'Espana' ? 'España' : c;
+                return (
+                  <option key={c} value={c}>{label}</option>
+                );
+              })}
             </select>
           </div>
 
