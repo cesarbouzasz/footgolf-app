@@ -111,6 +111,19 @@ export async function POST(req: NextRequest) {
       if (key in body) profilePayload[key] = (body as any)[key];
     }
 
+    const isAnonymous = (user as any)?.user_metadata?.['is_anonymous'] === true;
+    if (!isAnonymous) {
+      const { data: existing } = await supabaseAdmin
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+      const existingRole = (existing as any)?.role;
+      if (!existingRole) {
+        profilePayload.role = 'usuario';
+      }
+    }
+
     const result = await upsertProfileWithRetry(profilePayload);
     if (!result.ok) {
       const msg = (result.error as any)?.message || 'Error guardando perfil';
