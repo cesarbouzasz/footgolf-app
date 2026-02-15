@@ -190,7 +190,7 @@ export default function AdminPlayersPage() {
 
             <div className="border border-white/70 rounded-2xl bg-white/90 overflow-hidden shadow-sm">
               <div className="overflow-x-auto">
-                <table className="min-w-[860px] w-full text-sm">
+                <table className="min-w-[920px] w-full text-sm">
                   <thead>
                     <tr className="text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-200 bg-white/80">
                       <th className="text-left font-semibold px-4 py-3">ID</th>
@@ -204,16 +204,17 @@ export default function AdminPlayersPage() {
                           {t('adminPlayers.eventsPlayed')}
                         </span>
                       </th>
+                      <th className="text-left font-semibold px-4 py-3">{t('common.edit')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {playersLoading ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-6 text-gray-500">{t('common.loading')}</td>
+                        <td colSpan={7} className="px-4 py-6 text-gray-500">{t('common.loading')}</td>
                       </tr>
                     ) : filtered.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-6 text-gray-500">{t('adminPlayers.empty')}</td>
+                        <td colSpan={7} className="px-4 py-6 text-gray-500">{t('adminPlayers.empty')}</td>
                       </tr>
                     ) : (
                       filtered.map((p) => (
@@ -231,6 +232,11 @@ export default function AdminPlayersPage() {
                             <span className="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-gray-800">
                               {Number(p.events_played_last_year || 0)}
                             </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Link href={`/admin/jugadores/${p.id}`} className="text-xs font-semibold text-blue-700 hover:text-blue-900">
+                              {t('common.edit')}
+                            </Link>
                           </td>
                         </tr>
                       ))
