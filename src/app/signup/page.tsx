@@ -24,6 +24,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const { t } = useLanguage();
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://footgolf-app.vercel.app';
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +63,7 @@ export default function SignupPage() {
         email,
         password,
         options: {
+          emailRedirectTo: `${siteUrl}/login`,
           data: {
             first_name: firstName,
             last_name: lastName,
