@@ -338,6 +338,12 @@ export default function ProfilePage() {
     return () => { active = false; };
   }, [profile?.id]);
 
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace('/login');
+    }
+  }, [loading, user, router]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">

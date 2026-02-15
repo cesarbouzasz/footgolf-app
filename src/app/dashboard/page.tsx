@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useAuth } from '@/context/auth-context';
 import { useLanguage } from '@/context/language-context';
 import Link from 'next/link';
@@ -21,6 +22,12 @@ export default function DashboardPage() {
   const { user, loading, signOut, isAdmin } = useAuth();
   const { t } = useLanguage();
   const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace('/login');
+    }
+  }, [loading, user, router]);
 
   if (loading) {
     return (
