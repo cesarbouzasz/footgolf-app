@@ -370,7 +370,14 @@ export default function SignupPage() {
           <div className="relative group">
             <select
               value={country}
-              onChange={(e) => setCountry(e.target.value)}
+              onChange={(e) => {
+                const nextCountry = e.target.value;
+                setCountry(nextCountry);
+                if (nextCountry !== 'Espana') {
+                  setRegion('');
+                  setProvince('');
+                }
+              }}
               disabled={loading}
               className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
             >
@@ -381,33 +388,37 @@ export default function SignupPage() {
             </select>
           </div>
 
-          <div className="relative group">
-            <select
-              value={region}
-              onChange={(e) => setRegion(e.target.value)}
-              disabled={loading}
-              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
-            >
-              <option value="">{t('signup.fields.region')}</option>
-              {SPANISH_REGIONS.map((r) => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
-          </div>
+          {country === 'Espana' && (
+            <>
+              <div className="relative group">
+                <select
+                  value={region}
+                  onChange={(e) => setRegion(e.target.value)}
+                  disabled={loading}
+                  className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
+                >
+                  <option value="">{t('signup.fields.region')}</option>
+                  {SPANISH_REGIONS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="relative group">
-            <select
-              value={province}
-              onChange={(e) => setProvince(e.target.value)}
-              disabled={loading}
-              className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
-            >
-              <option value="">{t('signup.fields.province')}</option>
-              {SPANISH_PROVINCES.map((p) => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-          </div>
+              <div className="relative group">
+                <select
+                  value={province}
+                  onChange={(e) => setProvince(e.target.value)}
+                  disabled={loading}
+                  className="w-full bg-black/50 backdrop-blur-xl border border-[#bef264]/30 hover:border-[#bef264]/50 focus:border-[#bef264] py-2 pl-3 pr-2 text-white outline-none transition-all duration-300 font-bold italic text-xs rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.5)] disabled:opacity-50"
+                >
+                  <option value="">{t('signup.fields.province')}</option>
+                  {SPANISH_PROVINCES.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
 
           <div className="relative group">
             <Lock className="absolute left-2 top-1/2 -translate-y-1/2 text-[#bef264]/60 group-focus-within:text-[#bef264] transition-colors" size={14} />
