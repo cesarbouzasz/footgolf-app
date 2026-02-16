@@ -18,6 +18,11 @@ interface PlayerRow {
   events_played_last_year?: number | null;
 }
 
+function shortId(id: string) {
+  const clean = (id || '').replace(/-/g, '');
+  return clean ? clean.slice(0, 8).toUpperCase() : '—';
+}
+
 export default function AdminPlayersPage() {
   const { user, profile, loading, isAdmin, currentAssociationId } = useAuth();
   const { t } = useLanguage();

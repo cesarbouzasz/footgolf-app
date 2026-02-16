@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Script from 'next/script';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/auth-context';
 import { supabase } from '@/lib/supabase';
@@ -15,9 +16,25 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
   const router = useRouter();
   const { signIn } = useAuth();
   const { t } = useLanguage();
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+
+  useEffect(() => {
+    if (!turnstileSiteKey) return;
+    (window as any).onTurnstileSuccess = (token: string) => {
+      setTurnstileToken(token || '');
+    };
+    (window as any).onTurnstileExpired = () => {
+      setTurnstileToken('');
+    };
+    return () => {
+      delete (window as any).onTurnstileSuccess;
+      delete (window as any).onTurnstileExpired;
+    };
+  }, [turnstileSiteKey]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,6 +63,26 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
+      if (turnstileSiteKey) {
+        if (!turnstileToken) {
+          setError(t('login.captchaRequired'));
+          return;
+        }
+
+        const verifyRes = await fetch('/api/verify-turnstile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: turnstileToken }),
+        });
+        const verifyJson = await verifyRes.json().catch(() => null);
+        if (!verifyRes.ok || !verifyJson?.ok) {
+          setError(t('login.captchaFailed'));
+          setTurnstileToken('');
+          (window as any).turnstile?.reset?.();
+          return;
+        }
+      }
+
       const { data, error } = await supabase.auth.signInAnonymously();
       if (error) {
         setError(error.message || t('login.guestLoginFailed'));
@@ -77,6 +114,9 @@ export default function LoginPage() {
       className="min-h-screen bg-cover bg-center"
       style={{ backgroundImage: "url('/aereo.jpg')" }}
     >
+      {turnstileSiteKey ? (
+        <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" strategy="afterInteractive" />
+      ) : null}
       <div className="min-h-screen bg-gradient-to-b from-black/55 via-black/30 to-black/65">
         <div className="mx-auto flex min-h-screen w-full max-w-lg flex-col items-stretch justify-start px-6 pb-8 pt-2 text-white">
           <div className="mb-6 flex flex-col items-center text-center">
@@ -152,6 +192,18 @@ export default function LoginPage() {
                 {loading ? t('common.loading') : t('login.loginButton')}
               </button>
             </form>
+
+            {turnstileSiteKey ? (
+              <div className="flex justify-center">
+                <div
+                  className="cf-turnstile"
+                  data-sitekey={turnstileSiteKey}
+                  data-theme="dark"
+                  data-callback="onTurnstileSuccess"
+                  data-expired-callback="onTurnstileExpired"
+                />
+              </div>
+            ) : null}
 
             <button
               type="button"

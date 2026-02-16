@@ -7,6 +7,8 @@ import { useAuth } from '@/context/auth-context';
 import AssociationSelector from '@/components/AssociationSelector';
 import { supabase } from '@/lib/supabase';
 import { exportResultsAll } from '@/lib/export-results';
+import { exportWeeklyDetailed, type WeeklyExportRow } from '@/lib/export-weekly';
+import { compareCardsForTieBreak } from '@/lib/rankings';
 import * as XLSX from 'xlsx';
 import { useLanguage } from '@/context/language-context';
 
@@ -54,6 +56,21 @@ type FinalClassificationRow = {
   strokes?: number | null;
   rounds?: Array<number | null>;
   note?: string | null;
+};
+
+type WeeklyCard = {
+  userId: string;
+  holes: Array<number | null>;
+  holesPlayed: number;
+  total: number | null;
+  isComplete: boolean;
+  gameId: string;
+  gameDate: string | null;
+};
+
+type WeeklyRowDraft = WeeklyExportRow & {
+  isComplete: boolean;
+  holesPlayed: number;
 };
 
 const inputClassName =
@@ -307,6 +324,71 @@ function normalizeRounds(raw: any, roundCount: number, fallbackTotal?: number | 
   return rounds;
 }
 
+const DEFAULT_WEEKLY_HOLES = 18;
+const DEFAULT_PAR_VALUE = 4;
+
+function buildCoursePars(course: any, holeCount: number) {
+  const pars = Array.isArray(course?.pars)
+    ? course.pars.map((value: any) => Number(value)).filter((value: number) => Number.isFinite(value))
+    : [];
+  if (pars.length >= holeCount) return pars.slice(0, holeCount);
+
+  const holesFromInfo = Array.isArray(course?.hole_info?.holes) ? course.hole_info.holes : [];
+  const infoPars = holesFromInfo
+    .map((hole: any) => Number(hole?.par))
+    .filter((value: number) => Number.isFinite(value));
+  if (infoPars.length >= holeCount) return infoPars.slice(0, holeCount);
+
+  return Array.from({ length: holeCount }, () => DEFAULT_PAR_VALUE);
+}
+
+function summarizeWeeklyCard(holes: Array<number | null>, holeCount: number) {
+  const limited = Array.from({ length: holeCount }, (_, idx) => holes[idx] ?? null);
+  const holesPlayed = limited.filter((value) => typeof value === 'number' && value > 0).length;
+  const total = limited.reduce((sum, value) => sum + (typeof value === 'number' && value > 0 ? value : 0), 0);
+  const hasAny = holesPlayed > 0;
+  return {
+    holes: limited,
+    holesPlayed,
+    total: hasAny ? total : null,
+    isComplete: holesPlayed >= holeCount,
+  };
+}
+
+function compareWeeklyCards(a: WeeklyCard, b: WeeklyCard) {
+  if (a.isComplete !== b.isComplete) return a.isComplete ? -1 : 1;
+  if (a.holesPlayed !== b.holesPlayed) return b.holesPlayed - a.holesPlayed;
+
+  if (a.total != null && b.total != null && a.total !== b.total) return a.total - b.total;
+  if (a.total == null && b.total != null) return 1;
+  if (a.total != null && b.total == null) return -1;
+
+  if (a.isComplete && b.isComplete) {
+    const cardA = a.holes.map((value) => value ?? 0);
+    const cardB = b.holes.map((value) => value ?? 0);
+    const tieBreak = compareCardsForTieBreak(cardA, cardB);
+    if (tieBreak !== 0) return tieBreak;
+  }
+
+  const timeA = a.gameDate ? new Date(a.gameDate).getTime() : 0;
+  const timeB = b.gameDate ? new Date(b.gameDate).getTime() : 0;
+  return timeA - timeB;
+}
+
+function pickBestWeeklyCard(cards: WeeklyCard[]) {
+  if (!cards.length) return null;
+  const sorted = [...cards].sort(compareWeeklyCards);
+  return sorted[0] || null;
+}
+
+function buildDiffLabel(total: number | null, parTotal: number | null) {
+  if (total == null || parTotal == null) return null;
+  const diff = total - parTotal;
+  if (diff === 0) return 'E';
+  if (diff > 0) return `+${diff}`;
+  return String(diff);
+}
+
 function buildFinalClassificationFromPlayers(
   players: RegisteredPlayer[],
   prev: any,
@@ -445,7 +527,7 @@ export default function AdminEditarEventoPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const [exportModalOpen, setExportModalOpen] = useState(false);
-  const [exportTarget, setExportTarget] = useState<'final' | 'points' | 'championship'>('final');
+  const [exportTarget, setExportTarget] = useState<'final' | 'points' | 'championship' | 'weekly'>('final');
   const [championshipCategoryFilter, setChampionshipCategoryFilter] = useState('');
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
@@ -465,6 +547,8 @@ export default function AdminEditarEventoPage() {
     const s = String(status || '').trim().toLowerCase();
     return ['closed', 'finished', 'finalizado', 'cerrado'].includes(s);
   }, [status]);
+
+  const isWeeklyExport = exportTarget === 'weekly';
 
   useEffect(() => {
     document.body.classList.add('premium-admin-bg');
@@ -1516,7 +1600,192 @@ export default function AdminEditarEventoPage() {
     return Array.isArray(list) ? list : [];
   }, [championshipStandings]);
 
+  const handleExportWeeklyDetailed = async (format: 'xlsx' | 'pdf') => {
+    const eventId = String(selectedEventId || '').trim();
+    if (!eventId) return;
+
+    setErrorMsg(null);
+
+    try {
+      const { data: games, error: gamesError } = await supabase
+        .from('games')
+        .select('id, players, created_at')
+        .eq('tournament_id', eventId);
+
+      if (gamesError) throw gamesError;
+      if (!games || games.length === 0) {
+        setErrorMsg(t('adminEventsEdit.weeklyExportNoGames'));
+        return;
+      }
+
+      const gameIds = games.map((game: any) => String(game?.id || '')).filter(Boolean);
+      const gameDateById = new Map(
+        games.map((game: any) => [String(game?.id || ''), game?.created_at ? String(game.created_at) : null])
+      );
+      const playersFromGames = games.flatMap((game: any) => normalizeIdArray(game?.players));
+
+      const { data: scoreRows, error: scoreError } = await supabase
+        .from('scores')
+        .select('game_id, user_id, hole_number, strokes')
+        .in('game_id', gameIds);
+
+      if (scoreError) throw scoreError;
+      if (!scoreRows || scoreRows.length === 0) {
+        setErrorMsg(t('adminEventsEdit.weeklyExportNoScores'));
+        return;
+      }
+
+      const playersFromScores = scoreRows
+        .map((row: any) => String(row?.user_id || '').trim())
+        .filter(Boolean);
+      const allPlayerIds = Array.from(new Set([...playersFromGames, ...playersFromScores]));
+
+      const profileNameById = new Map<string, string>();
+      const profileCategoryById = new Map<string, string | null>();
+      if (allPlayerIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, category')
+          .in('id', allPlayerIds);
+
+        (profiles || []).forEach((row: any) => {
+          const id = String(row?.id || '').trim();
+          if (!id) return;
+          const name = [row?.first_name, row?.last_name].filter(Boolean).join(' ').trim();
+          profileNameById.set(id, name || id);
+          profileCategoryById.set(id, row?.category || null);
+        });
+      }
+
+      registeredPlayers.forEach((player) => {
+        if (!profileNameById.has(player.id)) profileNameById.set(player.id, player.name || player.id);
+        if (!profileCategoryById.has(player.id)) profileCategoryById.set(player.id, player.category || null);
+      });
+
+      let pars = Array.from({ length: DEFAULT_WEEKLY_HOLES }, () => DEFAULT_PAR_VALUE);
+      const courseRef = courseId.trim();
+      if (courseRef) {
+        const { data: course } = await supabase
+          .from('courses')
+          .select('pars, hole_info')
+          .eq('id', courseRef)
+          .single();
+        pars = buildCoursePars(course, DEFAULT_WEEKLY_HOLES);
+      }
+
+      const holeCount = pars.length || DEFAULT_WEEKLY_HOLES;
+      const cardMap = new Map<string, WeeklyCard>();
+
+      scoreRows.forEach((row: any) => {
+        const gameId = String(row?.game_id || '').trim();
+        const userId = String(row?.user_id || '').trim();
+        const holeNumber = Number(row?.hole_number);
+        const strokes = Number(row?.strokes);
+
+        if (!gameId || !userId || !Number.isFinite(holeNumber) || !Number.isFinite(strokes)) return;
+        const holeIndex = holeNumber - 1;
+        if (holeIndex < 0 || holeIndex >= holeCount) return;
+
+        const key = `${gameId}:${userId}`;
+        let card = cardMap.get(key);
+        if (!card) {
+          card = {
+            userId,
+            holes: Array.from({ length: holeCount }, () => null),
+            holesPlayed: 0,
+            total: null,
+            isComplete: false,
+            gameId,
+            gameDate: gameDateById.get(gameId) || null,
+          };
+          cardMap.set(key, card);
+        }
+
+        card.holes[holeIndex] = strokes;
+      });
+
+      const cardsByUser = new Map<string, WeeklyCard[]>();
+      cardMap.forEach((card) => {
+        const summary = summarizeWeeklyCard(card.holes, holeCount);
+        const nextCard: WeeklyCard = {
+          ...card,
+          holes: summary.holes,
+          holesPlayed: summary.holesPlayed,
+          total: summary.total,
+          isComplete: summary.isComplete,
+        };
+        const list = cardsByUser.get(card.userId) || [];
+        list.push(nextCard);
+        cardsByUser.set(card.userId, list);
+      });
+
+      const parTotal = pars.reduce((sum, value) => sum + (Number(value) || 0), 0);
+      const rowDrafts: WeeklyRowDraft[] = [];
+
+      cardsByUser.forEach((cards, userId) => {
+        const best = pickBestWeeklyCard(cards);
+        if (!best) return;
+        const name = profileNameById.get(userId) || userId;
+        rowDrafts.push({
+          position: 0,
+          name,
+          holes: best.holes,
+          total: best.total,
+          diffLabel: buildDiffLabel(best.total, parTotal),
+          isComplete: best.isComplete,
+          holesPlayed: best.holesPlayed,
+        });
+      });
+
+      if (rowDrafts.length === 0) {
+        setErrorMsg(t('adminEventsEdit.weeklyExportNoCards'));
+        return;
+      }
+
+      const sorted = [...rowDrafts].sort((a, b) => {
+        if (a.isComplete !== b.isComplete) return a.isComplete ? -1 : 1;
+        if (a.holesPlayed !== b.holesPlayed) return b.holesPlayed - a.holesPlayed;
+        if (a.total == null && b.total == null) return 0;
+        if (a.total == null) return 1;
+        if (b.total == null) return -1;
+        if (a.total !== b.total) return a.total - b.total;
+        if (a.isComplete && b.isComplete) {
+          const tieBreak = compareCardsForTieBreak(
+            a.holes.map((value) => value ?? 0),
+            b.holes.map((value) => value ?? 0)
+          );
+          if (tieBreak !== 0) return tieBreak;
+        }
+        return 0;
+      });
+
+      const exportRows: WeeklyExportRow[] = sorted.map((row, index) => ({
+        position: index + 1,
+        name: row.name,
+        holes: row.holes,
+        total: row.total,
+        diffLabel: row.diffLabel,
+      }));
+
+      await exportWeeklyDetailed({
+        eventName: name || t('adminEventsEdit.eventFallback'),
+        eventDate: eventDate || null,
+        pars,
+        rows: exportRows,
+        formats: [format],
+      });
+    } catch (e: any) {
+      setErrorMsg(e?.message || t('adminEventsEdit.errors.weeklyExportFailed'));
+    }
+  };
+
   const handleExportResults = async (format: 'csv' | 'xlsx' | 'pdf') => {
+    if (exportTarget === 'weekly') {
+      if (format === 'xlsx' || format === 'pdf') {
+        await handleExportWeeklyDetailed(format);
+      }
+      return;
+    }
     const finalRows = finalClassification.map((row) => {
       const rounds = normalizeRounds(row.rounds, classificationRoundCount, row.strokes ?? null);
       const total = rounds.some((v) => v != null)
@@ -1557,7 +1826,7 @@ export default function AdminEditarEventoPage() {
     });
   };
 
-  const openExportModal = (target: 'final' | 'points' | 'championship') => {
+  const openExportModal = (target: 'final' | 'points' | 'championship' | 'weekly') => {
     setExportTarget(target);
     setExportModalOpen(true);
   };
@@ -3156,6 +3425,19 @@ export default function AdminEditarEventoPage() {
                         </div>
                       ) : null}
 
+                      {isEventClosed && isStableford && stablefordMode === 'weekly' ? (
+                        <div className="flex justify-end pt-2">
+                          <button
+                            type="button"
+                            className="px-3 py-2 rounded-xl text-sm bg-emerald-600 border border-emerald-600 text-white disabled:opacity-50"
+                            onClick={() => openExportModal('weekly')}
+                            disabled={saving || loadingEvent}
+                          >
+                            {t('adminEventsEdit.weeklyExport')}
+                          </button>
+                        </div>
+                      ) : null}
+
                       <div className="border border-gray-200 rounded-2xl p-3 bg-white/70 space-y-3">
                         <div className="flex items-center justify-between gap-2">
                           <div>
@@ -3230,16 +3512,18 @@ export default function AdminEditarEventoPage() {
               <div className="text-sm font-semibold text-gray-900">{t('adminEventsEdit.exportTitle')}</div>
               <div className="text-xs text-gray-500 mt-1">{t('adminEventsEdit.exportSubtitle')}</div>
               <div className="mt-4 grid grid-cols-1 gap-2">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await handleExportResults('csv');
-                    setExportModalOpen(false);
-                  }}
-                  className="rounded-xl border border-gray-200 px-3 py-2 text-xs text-gray-700"
-                >
-                  CSV
-                </button>
+                {!isWeeklyExport ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleExportResults('csv');
+                      setExportModalOpen(false);
+                    }}
+                    className="rounded-xl border border-gray-200 px-3 py-2 text-xs text-gray-700"
+                  >
+                    CSV
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={async () => {
