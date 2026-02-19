@@ -877,7 +877,6 @@ export const EN = {
       registrationEndInvalid: "Registration end date is invalid (YYYY-MM-DD).",
       maxPlayersInvalid: "Invalid max players (2..256).",
       weeklyMaxAttemptsInvalid: "Invalid max attempts (>=1).",
-        startModeInvalid: "Configure start type (hole, time, interval).",
       seedCountInvalid: "Invalid seed count (2/4/8/16/32/64).",
       seedCountExceedsMax: "Seeds cannot exceed max players.",
       createHttpError: "Could not create (HTTP {status}).",
