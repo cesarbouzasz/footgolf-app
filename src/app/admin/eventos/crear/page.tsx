@@ -983,13 +983,11 @@ export default function AdminCrearEventoPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-sm text-gray-800">
-                  {t('adminEventsCreate.courseLabel')} <span className="text-red-500">**</span>
           <Link href="/login" className="text-blue-600">
             {t('common.login')}
           </Link>
         </div>
       </div>
-                  className={withError(selectClassName, showValidation && validation.courseMissing)}
   }
 
   if (!isAdmin) {
