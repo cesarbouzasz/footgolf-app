@@ -988,6 +988,7 @@ export default function AdminCrearEventoPage() {
           </Link>
         </div>
       </div>
+    );
   }
 
   if (!isAdmin) {
