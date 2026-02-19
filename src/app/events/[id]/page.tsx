@@ -468,6 +468,15 @@ export default function EventDetailPage() {
     return 'registration';
   }, [isEventClosed, isEventStarted]);
 
+  const stablefordConfig = useMemo(() => {
+    return (event?.config as any)?.stableford || null;
+  }, [event]);
+
+  const isAttemptBased = useMemo(() => {
+    const mode = String(stablefordConfig?.mode || '').toLowerCase();
+    return mode === 'weekly' || mode === 'best_card';
+  }, [stablefordConfig]);
+
   const registrationOpen = useMemo(() => {
     const now = new Date();
     const inWindow = isBetween(now, toDate(event?.registration_start), toDate(event?.registration_end));
@@ -527,15 +536,6 @@ export default function EventDetailPage() {
       .filter((row: any) => row.user_id)
       .sort((a: any, b: any) => (a.position ?? 9999) - (b.position ?? 9999));
   }, [event]);
-
-  const stablefordConfig = useMemo(() => {
-    return (event?.config as any)?.stableford || null;
-  }, [event]);
-
-  const isAttemptBased = useMemo(() => {
-    const mode = String(stablefordConfig?.mode || '').toLowerCase();
-    return mode === 'weekly' || mode === 'best_card';
-  }, [stablefordConfig]);
 
   const flights = useMemo(() => {
     const raw = (event?.config as any)?.flights;
