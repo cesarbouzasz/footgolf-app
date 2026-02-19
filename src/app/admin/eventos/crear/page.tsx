@@ -611,7 +611,7 @@ export default function AdminCrearEventoPage() {
         return;
       }
 
-      const data = template.payload || {};
+      const data = (template.payload || {}) as Record<string, any>;
       setFormat(data.format || 'stableford');
       setStatus(data.status || 'inscripcion');
       setDescription(data.description || '');
