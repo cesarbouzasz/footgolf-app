@@ -75,8 +75,8 @@ export async function GET(req: NextRequest) {
         .from('events')
         .select(
           includeAssociationId
-            ? 'id, name, event_date, competition_mode, location, description, association_id, config'
-            : 'id, name, event_date, competition_mode, location, description, config'
+            ? 'id, name, event_date, competition_mode, description, association_id, config'
+            : 'id, name, event_date, competition_mode, description, config'
         )
         .gte('event_date', start)
         .lte('event_date', end)
@@ -141,7 +141,7 @@ export async function GET(req: NextRequest) {
             end_date: row?.config?.event_end_date || null,
             category: derivedCategory,
             format: row.competition_mode ?? null,
-            location: row.location ?? null,
+            location: null,
             description: row.description ?? null,
             association_id: row.association_id ?? null,
           };

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Script from 'next/script';
@@ -17,24 +17,50 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileEnabled, setTurnstileEnabled] = useState(false);
+  const [showTurnstile, setShowTurnstile] = useState(false);
+  const [turnstileLoaded, setTurnstileLoaded] = useState(false);
+  const [guestLoginRequested, setGuestLoginRequested] = useState(false);
+  const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
+  const turnstileRenderedRef = useRef(false);
   const router = useRouter();
   const { signIn } = useAuth();
   const { t } = useLanguage();
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  const allowedHosts = (process.env.NEXT_PUBLIC_TURNSTILE_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean);
 
   useEffect(() => {
+    if (!turnstileSiteKey || typeof window === 'undefined') {
+      setTurnstileEnabled(false);
+      return;
+    }
+    if (allowedHosts.length === 0) {
+      setTurnstileEnabled(true);
+      return;
+    }
+    const hostname = window.location.hostname;
+    setTurnstileEnabled(allowedHosts.includes(hostname));
+  }, [turnstileSiteKey, allowedHosts]);
+
+  useEffect(() => {
+    if (!turnstileEnabled || !showTurnstile || !turnstileLoaded) return;
     if (!turnstileSiteKey) return;
-    (window as any).onTurnstileSuccess = (token: string) => {
-      setTurnstileToken(token || '');
-    };
-    (window as any).onTurnstileExpired = () => {
-      setTurnstileToken('');
-    };
-    return () => {
-      delete (window as any).onTurnstileSuccess;
-      delete (window as any).onTurnstileExpired;
-    };
-  }, [turnstileSiteKey]);
+    if (!turnstileContainerRef.current) return;
+    if (turnstileRenderedRef.current) return;
+    const turnstile = (window as any).turnstile;
+    if (!turnstile?.render) return;
+    turnstile.render(turnstileContainerRef.current, {
+      sitekey: turnstileSiteKey,
+      theme: 'dark',
+      size: 'normal',
+      callback: (token: string) => setTurnstileToken(token || ''),
+      'expired-callback': () => setTurnstileToken(''),
+    });
+    turnstileRenderedRef.current = true;
+  }, [showTurnstile, turnstileEnabled, turnstileLoaded, turnstileSiteKey]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,11 +85,15 @@ export default function LoginPage() {
     }
   };
 
-  const handleGuestLogin = async () => {
+  const attemptGuestLogin = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      if (turnstileSiteKey) {
+      if (turnstileEnabled) {
+        if (!showTurnstile) {
+          setShowTurnstile(true);
+          return;
+        }
         if (!turnstileToken) {
           setError(t('login.captchaRequired'));
           return;
@@ -79,6 +109,7 @@ export default function LoginPage() {
           setError(t('login.captchaFailed'));
           setTurnstileToken('');
           (window as any).turnstile?.reset?.();
+          setGuestLoginRequested(false);
           return;
         }
       }
@@ -86,14 +117,17 @@ export default function LoginPage() {
       const { data, error } = await supabase.auth.signInAnonymously();
       if (error) {
         setError(error.message || t('login.guestLoginFailed'));
+        setGuestLoginRequested(false);
         return;
       }
 
       if (!data?.session) {
         setError(t('login.guestLoginFailed'));
+        setGuestLoginRequested(false);
         return;
       }
 
+      setGuestLoginRequested(false);
       window.location.assign('/dashboard');
 
       setTimeout(() => {
@@ -104,9 +138,20 @@ export default function LoginPage() {
       }, 1500);
     } catch (err: any) {
       setError(t('login.unexpectedError'));
+      setGuestLoginRequested(false);
     } finally {
       setLoading(false);
     }
+  }, [showTurnstile, turnstileEnabled, turnstileToken, t]);
+
+  useEffect(() => {
+    if (!guestLoginRequested || !turnstileEnabled || !turnstileToken) return;
+    attemptGuestLogin();
+  }, [guestLoginRequested, turnstileEnabled, turnstileToken, attemptGuestLogin]);
+
+  const handleGuestLogin = () => {
+    setGuestLoginRequested(true);
+    attemptGuestLogin();
   };
 
   return (
@@ -114,8 +159,12 @@ export default function LoginPage() {
       className="min-h-screen bg-cover bg-center"
       style={{ backgroundImage: "url('/aereo.jpg')" }}
     >
-      {turnstileSiteKey ? (
-        <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" strategy="afterInteractive" />
+      {turnstileEnabled && showTurnstile ? (
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+          strategy="afterInteractive"
+          onLoad={() => setTurnstileLoaded(true)}
+        />
       ) : null}
       <div className="min-h-screen bg-gradient-to-b from-black/55 via-black/30 to-black/65">
         <div className="mx-auto flex min-h-screen w-full max-w-lg flex-col items-stretch justify-start px-6 pb-8 pt-2 text-white">
@@ -193,15 +242,9 @@ export default function LoginPage() {
               </button>
             </form>
 
-            {turnstileSiteKey ? (
+            {turnstileEnabled && showTurnstile ? (
               <div className="flex justify-center">
-                <div
-                  className="cf-turnstile"
-                  data-sitekey={turnstileSiteKey}
-                  data-theme="dark"
-                  data-callback="onTurnstileSuccess"
-                  data-expired-callback="onTurnstileExpired"
-                />
+                <div ref={turnstileContainerRef} className="min-h-[65px] min-w-[300px]" />
               </div>
             ) : null}
 

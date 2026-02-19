@@ -6,6 +6,7 @@ Actions performed:
 - Located and copied documentation to `docs_backup` including `00_LEER_PRIMERO.txt` and migration SQL.
 - Executed `node scripts/setup-db.js` which seeded admins/players and added `chatbot_enabled` (verified via `node scripts/check-db.js`).
 - Added `baseUrl`/`paths` to `tsconfig.json` to map `@/*` → `src/*` and restarted the dev server.
+- Added `scripts/events-description-column.sql` to create `events.description` and refresh PostgREST schema cache.
 
 Checks completed:
 - Dev server running at http://localhost:3000 (served `/dashboard` with 200).

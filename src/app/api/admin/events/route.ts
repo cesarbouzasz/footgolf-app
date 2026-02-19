@@ -286,7 +286,10 @@ export async function POST(req: NextRequest) {
     }
 
     const courseIdRaw = typeof body?.course_id === 'string' ? body.course_id.trim() : '';
-    if (courseIdRaw && !isUuid(courseIdRaw)) {
+    if (!courseIdRaw) {
+      return NextResponse.json({ ok: false, error: 'Missing course_id' }, { status: 200 });
+    }
+    if (!isUuid(courseIdRaw)) {
       return NextResponse.json({ ok: false, error: 'Invalid course_id' }, { status: 200 });
     }
 
@@ -315,7 +318,6 @@ export async function POST(req: NextRequest) {
       registration_start: registrationStart ? String(registrationStart) : null,
       registration_end: registrationEnd ? String(registrationEnd) : null,
       event_date: eventDate ? String(eventDate) : null,
-      location: typeof body?.location === 'string' && body.location.trim() ? body.location.trim() : null,
       description: typeof body?.description === 'string' && body.description.trim() ? body.description.trim() : null,
       config,
       has_handicap_ranking: !!body?.has_handicap_ranking,

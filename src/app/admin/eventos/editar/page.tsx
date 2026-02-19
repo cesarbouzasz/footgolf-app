@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, DoorOpen, Pencil, Save, RefreshCw, ChevronUp, ChevronDown, PlusCircle } from 'lucide-react';
+import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { useAuth } from '@/context/auth-context';
 import AssociationSelector from '@/components/AssociationSelector';
 import { supabase } from '@/lib/supabase';
@@ -19,6 +20,7 @@ type MatchPlayFormat = 'classic' | 'groups';
 type GroupMode = 'single' | 'multi';
 type StablefordMode = 'classic' | 'best_card' | 'best_hole' | 'weekly';
 type PointsMode = 'manual' | 'percent';
+type StartMode = 'tiro' | 'hoyo_intervalo' | 'libre';
 type ChampHubEventDraft = {
   eventId: string;
   kind: 'simple' | 'doble';
@@ -32,6 +34,12 @@ type ChampHubEventDraft = {
 const CATEGORY_OPTIONS = ['Masculino', 'Femenino', 'Senior', 'Senior+', 'Junior'];
 
 type RegisteredPlayer = { id: string; name: string; category?: string | null };
+type FlightDraft = {
+  id: string;
+  name: string;
+  active: boolean;
+  playerIds: string[];
+};
 
 type BracketMatch = {
   p1: string;
@@ -79,6 +87,11 @@ const selectClassName =
   'w-full rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200';
 const textareaClassName =
   'w-full rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200';
+const STATUS_OPTIONS = [
+  { value: 'inscripcion', label: 'Abierto' },
+  { value: 'en_juego', label: 'En juego' },
+  { value: 'cerrado', label: 'Cerrado' },
+];
 
 const buildDefaultChampHubEvent = (): ChampHubEventDraft => ({
   eventId: '',
@@ -460,13 +473,17 @@ export default function AdminEditarEventoPage() {
   const [registrationStart, setRegistrationStart] = useState('');
   const [registrationEnd, setRegistrationEnd] = useState('');
   const [status, setStatus] = useState('');
-  const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
   const [courseId, setCourseId] = useState('');
   const [competitionMode, setCompetitionMode] = useState('');
   const [maxPlayersRaw, setMaxPlayersRaw] = useState('');
   const [teamCompetitionEnabled, setTeamCompetitionEnabled] = useState(false);
   const [teamBestPlayersRaw, setTeamBestPlayersRaw] = useState('');
+
+  const [startMode, setStartMode] = useState<StartMode>('tiro');
+  const [startHoleRaw, setStartHoleRaw] = useState('1');
+  const [startTimeRaw, setStartTimeRaw] = useState('');
+  const [startIntervalRaw, setStartIntervalRaw] = useState('');
 
   const [matchPlayFormat, setMatchPlayFormat] = useState<MatchPlayFormat>('classic');
   const [groupMode, setGroupMode] = useState<GroupMode>('single');
@@ -481,6 +498,7 @@ export default function AdminEditarEventoPage() {
   const [stablefordMode, setStablefordMode] = useState<StablefordMode>('classic');
   const [classicRoundsRaw, setClassicRoundsRaw] = useState('1');
   const [bestCardRoundsRaw, setBestCardRoundsRaw] = useState('2');
+  const [bestCardMaxAttemptsRaw, setBestCardMaxAttemptsRaw] = useState('');
   const [bestHoleRoundsRaw, setBestHoleRoundsRaw] = useState('2');
   const [weeklyAllowExtraAttempts, setWeeklyAllowExtraAttempts] = useState(false);
   const [weeklyMaxAttemptsRaw, setWeeklyMaxAttemptsRaw] = useState('');
@@ -516,6 +534,7 @@ export default function AdminEditarEventoPage() {
   const [manualPlayerSearch, setManualPlayerSearch] = useState('');
 
   const [registeredPlayers, setRegisteredPlayers] = useState<RegisteredPlayer[]>([]);
+    const [flightDrafts, setFlightDrafts] = useState<FlightDraft[]>([]);
   const [eventConfig, setEventConfig] = useState<any>({});
   const [paidPlayerIds, setPaidPlayerIds] = useState<string[]>([]);
   const [paymentBusyId, setPaymentBusyId] = useState<string | null>(null);
@@ -641,13 +660,16 @@ export default function AdminEditarEventoPage() {
     setRegistrationStart('');
     setRegistrationEnd('');
     setStatus('');
-    setLocation('');
     setDescription('');
     setCourseId('');
     setCompetitionMode('');
     setMaxPlayersRaw('');
     setTeamCompetitionEnabled(false);
     setTeamBestPlayersRaw('');
+    setStartMode('tiro');
+    setStartHoleRaw('1');
+    setStartTimeRaw('');
+    setStartIntervalRaw('');
     setMatchPlayFormat('classic');
     setGroupMode('single');
     setGroupHolesRaw('18');
@@ -660,6 +682,7 @@ export default function AdminEditarEventoPage() {
     setStablefordMode('classic');
     setClassicRoundsRaw('1');
     setBestCardRoundsRaw('2');
+    setBestCardMaxAttemptsRaw('');
     setBestHoleRoundsRaw('2');
     setWeeklyAllowExtraAttempts(false);
     setWeeklyMaxAttemptsRaw('');
@@ -691,6 +714,7 @@ export default function AdminEditarEventoPage() {
     setManualPlayerSearch('');
 
     setRegisteredPlayers([]);
+    setFlightDrafts([]);
     setPaidPlayerIds([]);
     setPaymentBusyId(null);
     setFinalClassification([]);
@@ -742,7 +766,6 @@ export default function AdminEditarEventoPage() {
         setRegistrationStart(String(ev?.registration_start || ''));
         setRegistrationEnd(String(ev?.registration_end || ''));
         setStatus(String(ev?.status || ''));
-        setLocation(String(ev?.location || ''));
         setDescription(String(ev?.description || ''));
         setCourseId(String(ev?.course_id || ''));
         setCompetitionMode(String(ev?.competition_mode || ''));
@@ -756,6 +779,12 @@ export default function AdminEditarEventoPage() {
         setPaidPlayerIds(normalizeIdArray(config?.paid_player_ids));
         setTeamCompetitionEnabled(!!config?.teamCompetitionEnabled);
         setTeamBestPlayersRaw(config?.teamBestPlayers != null ? String(config.teamBestPlayers) : '');
+        const starting = (config as any)?.starting || {};
+        const startModeValue = String(starting?.mode || 'tiro');
+        setStartMode(startModeValue === 'hoyo_intervalo' ? 'hoyo_intervalo' : startModeValue === 'libre' ? 'libre' : 'tiro');
+        setStartHoleRaw(starting?.startHole != null ? String(starting.startHole) : '1');
+        setStartTimeRaw(starting?.startTime != null ? String(starting.startTime) : '');
+        setStartIntervalRaw(starting?.intervalMinutes != null ? String(starting.intervalMinutes) : '');
         setMatchPlayFormat((config?.matchPlayFormat as MatchPlayFormat) || 'classic');
         setGroupMode((config?.groupMode as GroupMode) || 'single');
         setGroupHolesRaw(config?.groupHoles != null ? String(config.groupHoles) : '18');
@@ -768,6 +797,7 @@ export default function AdminEditarEventoPage() {
         setStablefordMode((config?.stableford?.mode as StablefordMode) || 'classic');
         setClassicRoundsRaw(config?.stableford?.classicRounds != null ? String(config.stableford.classicRounds) : '1');
         setBestCardRoundsRaw(config?.stableford?.bestCardRounds != null ? String(config.stableford.bestCardRounds) : '2');
+        setBestCardMaxAttemptsRaw(config?.stableford?.bestCardMaxAttempts != null ? String(config.stableford.bestCardMaxAttempts) : '');
         setBestHoleRoundsRaw(config?.stableford?.bestHoleRounds != null ? String(config.stableford.bestHoleRounds) : '2');
         const weeklyConfig = config?.stableford?.weekly;
         const weeklyMaxAttempts = Number(weeklyConfig?.maxAttempts);
@@ -820,6 +850,22 @@ export default function AdminEditarEventoPage() {
         setManualPlayerSearch('');
 
         setRegisteredPlayers(mappedPlayers);
+        const registeredIds = new Set(mappedPlayers.map((p) => p.id));
+        const rawFlights = Array.isArray((config as any)?.flights) ? (config as any).flights : [];
+        const nextFlights: FlightDraft[] = rawFlights
+          .map((flight: any, idx: number) => {
+            const playerIds = Array.isArray(flight?.playerIds)
+              ? flight.playerIds.map((id: any) => String(id || '').trim()).filter(Boolean)
+              : [];
+            return {
+              id: String(flight?.id || `flight-${idx + 1}`),
+              name: String(flight?.name || `Flight ${idx + 1}`),
+              active: !!flight?.active,
+              playerIds: playerIds.filter((id) => registeredIds.has(id)),
+            };
+          })
+          .filter((flight: FlightDraft) => flight.id);
+        setFlightDrafts(nextFlights);
 
         const prevFinal = config?.finalClassification;
         const roundCountFromConfig = config?.stableford?.mode === 'classic'
@@ -865,6 +911,7 @@ export default function AdminEditarEventoPage() {
     if (!selectedEventId.trim()) return false;
     if (!name.trim()) return false;
     if (eventDate && !isIsoDate(eventDate)) return false;
+    if (!courseId.trim()) return false;
     if (eventEndDate && !isIsoDate(eventEndDate)) return false;
     if (eventEndDate && eventDate && eventEndDate < eventDate) return false;
     if (registrationStart && !isIsoDate(registrationStart)) return false;
@@ -878,6 +925,14 @@ export default function AdminEditarEventoPage() {
     if (teamCompetitionEnabled && teamBestPlayersRaw.trim()) {
       const n = Number.parseInt(teamBestPlayersRaw, 10);
       if (!Number.isFinite(n) || n < 1) return false;
+    }
+
+    if (startMode === 'hoyo_intervalo') {
+      const hole = Number.parseInt(startHoleRaw, 10);
+      const interval = Number.parseInt(startIntervalRaw, 10);
+      if (!startTimeRaw.trim()) return false;
+      if (!Number.isFinite(hole) || hole < 1 || hole > 36) return false;
+      if (!Number.isFinite(interval) || interval < 1) return false;
     }
 
     if (isStableford) {
@@ -898,7 +953,11 @@ export default function AdminEditarEventoPage() {
         }
       } else if (stablefordMode === 'best_card') {
         const rounds = Number.parseInt(bestCardRoundsRaw, 10);
-        if (!Number.isFinite(rounds) || rounds < 2) return false;
+        if (!Number.isFinite(rounds) || rounds < 1) return false;
+        if (bestCardMaxAttemptsRaw.trim()) {
+          const maxAttempts = Number.parseInt(bestCardMaxAttemptsRaw, 10);
+          if (!Number.isFinite(maxAttempts) || maxAttempts < 1) return false;
+        }
       } else if (stablefordMode === 'best_hole') {
         const rounds = Number.parseInt(bestHoleRoundsRaw, 10);
         if (!Number.isFinite(rounds) || rounds < 2) return false;
@@ -989,7 +1048,7 @@ export default function AdminEditarEventoPage() {
     }
 
     return true;
-  }, [selectedEventId, name, eventDate, eventEndDate, registrationStart, registrationEnd, maxPlayersRaw, teamCompetitionEnabled, teamBestPlayersRaw, isMatchPlay, isStableford, matchPlayFormat, holesPerRoundRaw, hasConsolation, consolationHolesPerRoundRaw, hasSeeds, seedCountRaw, groupMode, groupHolesRaw, groupMatchesPerDayRaw, groupDatesRaw, groupCountRaw, groupAdvanceRaw, stablefordMode, classicRoundsRaw, bestCardRoundsRaw, bestHoleRoundsRaw, weeklyAllowExtraAttempts, weeklyMaxAttemptsRaw, courseParRaw, pointsMode, pointsFirstRaw, pointsDecayRaw, pointsPodiumRaw, pointsTableRaw, champEnabled, champTotalRaw, champSimpleRaw, champDoubleRaw, champBestSimpleRaw, champBestDoubleRaw, champCategories, champHubEnabled, champHubCategories, champHubEvents]);
+  }, [selectedEventId, name, eventDate, eventEndDate, registrationStart, registrationEnd, courseId, maxPlayersRaw, teamCompetitionEnabled, teamBestPlayersRaw, startMode, startHoleRaw, startTimeRaw, startIntervalRaw, isMatchPlay, isStableford, matchPlayFormat, holesPerRoundRaw, hasConsolation, consolationHolesPerRoundRaw, hasSeeds, seedCountRaw, groupMode, groupHolesRaw, groupMatchesPerDayRaw, groupDatesRaw, groupCountRaw, groupAdvanceRaw, stablefordMode, classicRoundsRaw, bestCardRoundsRaw, bestCardMaxAttemptsRaw, bestHoleRoundsRaw, weeklyAllowExtraAttempts, weeklyMaxAttemptsRaw, courseParRaw, pointsMode, pointsFirstRaw, pointsDecayRaw, pointsPodiumRaw, pointsTableRaw, champEnabled, champTotalRaw, champSimpleRaw, champDoubleRaw, champBestSimpleRaw, champBestDoubleRaw, champCategories, champHubEnabled, champHubCategories, champHubEvents]);
 
   const onSave = async () => {
     setOkMsg(null);
@@ -1003,6 +1062,18 @@ export default function AdminEditarEventoPage() {
       setErrorMsg(t('adminEventsEdit.errors.nameRequired'));
       return;
     }
+    if (!courseId.trim()) {
+      setErrorMsg(t('adminEventsEdit.errors.courseRequired'));
+      return;
+    }
+    if (startMode === 'hoyo_intervalo') {
+      const hole = Number.parseInt(startHoleRaw, 10);
+      const interval = Number.parseInt(startIntervalRaw, 10);
+      if (!startTimeRaw.trim() || !Number.isFinite(hole) || hole < 1 || hole > 36 || !Number.isFinite(interval) || interval < 1) {
+        setErrorMsg(t('adminEventsEdit.errors.startModeInvalid'));
+        return;
+      }
+    }
 
     const config: any = {};
     const maxPlayers = maxPlayersRaw.trim() ? Number.parseInt(maxPlayersRaw, 10) : null;
@@ -1014,6 +1085,25 @@ export default function AdminEditarEventoPage() {
       config.teamBestPlayers = Number.isFinite(n) && n > 0 ? n : null;
     } else {
       config.teamBestPlayers = null;
+    }
+
+    const allowedPlayerIds = new Set(registeredPlayers.map((p) => p.id));
+    config.flights = flightDrafts.map((flight, idx) => ({
+      id: String(flight.id || `flight-${idx + 1}`),
+      name: String(flight.name || `Flight ${idx + 1}`),
+      active: !!flight.active,
+      playerIds: Array.from(new Set((flight.playerIds || []).filter((id) => allowedPlayerIds.has(id)))),
+    }));
+
+    if (startMode === 'hoyo_intervalo') {
+      config.starting = {
+        mode: 'hoyo_intervalo',
+        startHole: Number.parseInt(startHoleRaw, 10),
+        startTime: startTimeRaw.trim(),
+        intervalMinutes: Number.parseInt(startIntervalRaw, 10),
+      };
+    } else {
+      config.starting = { mode: startMode };
     }
     if (eventEndDate) {
       config.event_end_date = eventEndDate;
@@ -1053,6 +1143,9 @@ export default function AdminEditarEventoPage() {
         mode: stablefordMode,
         classicRounds: Number.isFinite(classicRounds) ? classicRounds : null,
         bestCardRounds: Number.isFinite(bestCardRounds) ? bestCardRounds : null,
+        bestCardMaxAttempts: bestCardMaxAttemptsRaw.trim()
+          ? Number.parseInt(bestCardMaxAttemptsRaw, 10)
+          : null,
         bestHoleRounds: Number.isFinite(bestHoleRounds) ? bestHoleRounds : null,
         weekly: stablefordMode === 'weekly'
           ? {
@@ -1189,7 +1282,6 @@ export default function AdminEditarEventoPage() {
           registration_end: registrationEnd || null,
           competition_mode: competitionMode.trim() || null,
           status: status.trim() || null,
-          location: location.trim() || null,
           description: description.trim() || null,
           course_id: courseId.trim() || null,
           has_handicap_ranking: false,
@@ -1263,7 +1355,6 @@ export default function AdminEditarEventoPage() {
           registration_end: registrationEnd || null,
           competition_mode: competitionMode.trim() || null,
           status: status.trim() || null,
-          location: location.trim() || null,
           description: description.trim() || null,
           course_id: courseId.trim() || null,
           has_handicap_ranking: false,
@@ -1349,7 +1440,6 @@ export default function AdminEditarEventoPage() {
           registration_end: registrationEnd || null,
           competition_mode: competitionMode.trim() || null,
           status: status.trim() || null,
-          location: location.trim() || null,
           description: description.trim() || null,
           course_id: courseId.trim() || null,
           has_handicap_ranking: false,
@@ -1403,6 +1493,53 @@ export default function AdminEditarEventoPage() {
     registeredPlayers.forEach((p) => m.set(p.id, p.category || null));
     return m;
   }, [registeredPlayers]);
+
+  const unassignedPlayerIds = useMemo(() => {
+    const assigned = new Set<string>();
+    flightDrafts.forEach((flight) => flight.playerIds.forEach((id) => assigned.add(id)));
+    return registeredPlayers.map((p) => p.id).filter((id) => !assigned.has(id));
+  }, [flightDrafts, registeredPlayers]);
+
+  const handleFlightDragEnd = (result: DropResult) => {
+    const { source, destination, draggableId } = result;
+    if (!destination) return;
+
+    const sourceId = source.droppableId;
+    const destId = destination.droppableId;
+
+    if (sourceId === destId) {
+      if (sourceId === 'pool') return;
+      const flightId = sourceId.replace('flight:', '');
+      setFlightDrafts((prev) =>
+        prev.map((flight) => {
+          if (flight.id !== flightId) return flight;
+          const nextIds = [...flight.playerIds];
+          nextIds.splice(source.index, 1);
+          nextIds.splice(destination.index, 0, draggableId);
+          return { ...flight, playerIds: nextIds };
+        })
+      );
+      return;
+    }
+
+    setFlightDrafts((prev) => {
+      const next = prev.map((flight) => ({ ...flight, playerIds: [...flight.playerIds] }));
+
+      next.forEach((flight) => {
+        flight.playerIds = flight.playerIds.filter((id) => id !== draggableId);
+      });
+
+      if (destId !== 'pool') {
+        const destFlightId = destId.replace('flight:', '');
+        const target = next.find((flight) => flight.id === destFlightId);
+        if (target) {
+          target.playerIds.splice(destination.index, 0, draggableId);
+        }
+      }
+
+      return next;
+    });
+  };
 
   const manualPlayerOptions = useMemo(
     () => registeredPlayers.map((p) => ({ value: `id:${p.id}`, label: p.name })),
@@ -1529,7 +1666,6 @@ export default function AdminEditarEventoPage() {
           registration_end: registrationEnd || null,
           competition_mode: competitionMode.trim() || null,
           status: status.trim() || null,
-          location: location.trim() || null,
           description: description.trim() || null,
           course_id: courseId.trim() || null,
           has_handicap_ranking: false,
@@ -2191,13 +2327,18 @@ export default function AdminEditarEventoPage() {
 
                   <div className="space-y-1">
                     <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.statusLabel')}</div>
-                    <input
-                      value={status}
-                      onChange={(e) => setStatus(e.target.value)}
-                      className={inputClassName}
-                      placeholder={t('adminEventsEdit.statusPlaceholder')}
-                      disabled={saving || loadingEvent}
-                    />
+                      <select
+                        value={status}
+                        onChange={(e) => setStatus(e.target.value)}
+                        className={selectClassName}
+                        disabled={saving || loadingEvent}
+                      >
+                        {STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                   </div>
 
                   <div className="space-y-1">
@@ -2238,8 +2379,61 @@ export default function AdminEditarEventoPage() {
                     )}
                   </div>
 
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.startModeLabel')}</div>
+                    <select
+                      value={startMode}
+                      onChange={(e) => setStartMode(e.target.value as StartMode)}
+                      className={selectClassName}
+                      disabled={saving || loadingEvent}
+                    >
+                      <option value="tiro">{t('adminEventsEdit.startModeShotgun')}</option>
+                      <option value="hoyo_intervalo">{t('adminEventsEdit.startModeIntervals')}</option>
+                      <option value="libre">{t('adminEventsEdit.startModeFree')}</option>
+                    </select>
+                    {startMode === 'hoyo_intervalo' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div className="space-y-1">
+                          <div className="text-[11px] text-gray-500">{t('adminEventsEdit.startHoleLabel')}</div>
+                          <input
+                            inputMode="numeric"
+                            value={startHoleRaw}
+                            onChange={(e) => setStartHoleRaw(e.target.value)}
+                            className={inputClassName}
+                            disabled={saving || loadingEvent}
+                            placeholder="1"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-[11px] text-gray-500">{t('adminEventsEdit.startTimeLabel')}</div>
+                          <input
+                            type="time"
+                            value={startTimeRaw}
+                            onChange={(e) => setStartTimeRaw(e.target.value)}
+                            className={inputClassName}
+                            disabled={saving || loadingEvent}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-[11px] text-gray-500">{t('adminEventsEdit.startIntervalLabel')}</div>
+                          <input
+                            inputMode="numeric"
+                            value={startIntervalRaw}
+                            onChange={(e) => setStartIntervalRaw(e.target.value)}
+                            className={inputClassName}
+                            disabled={saving || loadingEvent}
+                            placeholder="10"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <div className="text-[11px] text-gray-500">{t('adminEventsEdit.startModeHint')}</div>
+                  </div>
+
                   <div className="space-y-1">
-                    <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.courseLabel')}</div>
+                    <div className="text-xs font-semibold text-gray-700">
+                      {t('adminEventsEdit.courseLabel')} <span className="text-red-500">**</span>
+                    </div>
                     <select
                       value={courseId}
                       onChange={(e) => setCourseId(e.target.value)}
@@ -2267,26 +2461,147 @@ export default function AdminEditarEventoPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.locationLabel')}</div>
-                    <input
-                      value={location}
-                      onChange={(e) => setLocation(e.target.value)}
-                      className={inputClassName}
+                <div className="space-y-1">
+                  <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.descriptionLabel')}</div>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className={textareaClassName}
+                    rows={3}
+                    disabled={saving || loadingEvent}
+                  />
+                </div>
+
+                <div className="border border-gray-200 rounded-2xl p-3 bg-white/70 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-extrabold text-gray-900">{t('adminEventsEdit.flightsTitle')}</div>
+                      <div className="text-[11px] text-gray-500">{t('adminEventsEdit.flightsHint')}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const stamp = Date.now();
+                        setFlightDrafts((prev) => ([
+                          ...prev,
+                          { id: `flight-${stamp}`, name: `Flight ${prev.length + 1}`, active: false, playerIds: [] },
+                        ]));
+                      }}
+                      className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700"
                       disabled={saving || loadingEvent}
-                    />
+                    >
+                      {t('adminEventsEdit.flightsAdd')}
+                    </button>
                   </div>
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.descriptionLabel')}</div>
-                    <textarea
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      className={textareaClassName}
-                      rows={3}
-                      disabled={saving || loadingEvent}
-                    />
-                  </div>
+
+                  <DragDropContext onDragEnd={handleFlightDragEnd}>
+                    <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-3">
+                      <Droppable droppableId="pool">
+                        {(provided) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.droppableProps}
+                            className="rounded-2xl border border-dashed border-gray-200 p-3 bg-white/80"
+                          >
+                            <div className="text-xs font-semibold text-gray-700 mb-2">{t('adminEventsEdit.flightsPool')}</div>
+                            <div className="space-y-2">
+                              {unassignedPlayerIds.length === 0 && (
+                                <div className="text-[11px] text-gray-500">{t('adminEventsEdit.flightsPoolEmpty')}</div>
+                              )}
+                              {unassignedPlayerIds.map((playerId, index) => (
+                                <Draggable key={playerId} draggableId={playerId} index={index}>
+                                  {(dragProvided) => (
+                                    <div
+                                      ref={dragProvided.innerRef}
+                                      {...dragProvided.draggableProps}
+                                      {...dragProvided.dragHandleProps}
+                                      className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800"
+                                    >
+                                      {playerNameById.get(playerId) || playerId}
+                                    </div>
+                                  )}
+                                </Draggable>
+                              ))}
+                              {provided.placeholder}
+                            </div>
+                          </div>
+                        )}
+                      </Droppable>
+
+                      <div className="space-y-3">
+                        {flightDrafts.length === 0 && (
+                          <div className="text-[11px] text-gray-500">{t('adminEventsEdit.flightsEmpty')}</div>
+                        )}
+                        {flightDrafts.map((flight) => (
+                          <Droppable key={flight.id} droppableId={`flight:${flight.id}`}>
+                            {(provided) => (
+                              <div
+                                ref={provided.innerRef}
+                                {...provided.droppableProps}
+                                className="rounded-2xl border border-gray-200 bg-white/80 p-3 space-y-2"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <input
+                                    value={flight.name}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setFlightDrafts((prev) => prev.map((f) => (f.id === flight.id ? { ...f, name: value } : f)));
+                                    }}
+                                    className="text-sm font-semibold text-gray-800 bg-transparent border-b border-gray-200 focus:outline-none focus:border-gray-400"
+                                    disabled={saving || loadingEvent}
+                                  />
+                                  <label className="flex items-center gap-2 text-xs text-gray-600">
+                                    <input
+                                      type="checkbox"
+                                      checked={flight.active}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setFlightDrafts((prev) => prev.map((f) => (f.id === flight.id ? { ...f, active: checked } : f)));
+                                      }}
+                                      disabled={saving || loadingEvent}
+                                    />
+                                    {t('adminEventsEdit.flightsActive')}
+                                  </label>
+                                </div>
+
+                                <div className="space-y-2">
+                                  {flight.playerIds.length === 0 && (
+                                    <div className="text-[11px] text-gray-500">{t('adminEventsEdit.flightsEmptyPlayers')}</div>
+                                  )}
+                                  {flight.playerIds.map((playerId, index) => (
+                                    <Draggable key={`${flight.id}-${playerId}`} draggableId={playerId} index={index}>
+                                      {(dragProvided) => (
+                                        <div
+                                          ref={dragProvided.innerRef}
+                                          {...dragProvided.draggableProps}
+                                          {...dragProvided.dragHandleProps}
+                                          className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800"
+                                        >
+                                          {playerNameById.get(playerId) || playerId}
+                                        </div>
+                                      )}
+                                    </Draggable>
+                                  ))}
+                                  {provided.placeholder}
+                                </div>
+
+                                <div className="flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => setFlightDrafts((prev) => prev.filter((f) => f.id !== flight.id))}
+                                    className="text-[11px] text-red-600"
+                                    disabled={saving || loadingEvent}
+                                  >
+                                    {t('adminEventsEdit.flightsRemove')}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </Droppable>
+                        ))}
+                      </div>
+                    </div>
+                  </DragDropContext>
                 </div>
 
                 {isStableford && (
@@ -2335,15 +2650,27 @@ export default function AdminEditarEventoPage() {
                       )}
 
                       {stablefordMode === 'best_card' && (
-                        <div className="space-y-1">
-                          <div className="text-xs font-semibold text-gray-700">{t('adminEventsCreate.roundsCountLabel')}</div>
-                          <input
-                            value={bestCardRoundsRaw}
-                            onChange={(e) => setBestCardRoundsRaw(e.target.value)}
-                            className={inputClassName}
-                            placeholder={t('adminEventsCreate.roundsMinPlaceholder')}
-                            disabled={saving || loadingEvent}
-                          />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <div className="text-xs font-semibold text-gray-700">{t('adminEventsCreate.roundsCountLabel')}</div>
+                            <input
+                              value={bestCardRoundsRaw}
+                              onChange={(e) => setBestCardRoundsRaw(e.target.value)}
+                              className={inputClassName}
+                              placeholder={t('adminEventsCreate.roundsMinPlaceholder')}
+                              disabled={saving || loadingEvent}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-xs font-semibold text-gray-700">{t('adminEventsCreate.bestCardMaxAttemptsLabel')}</div>
+                            <input
+                              value={bestCardMaxAttemptsRaw}
+                              onChange={(e) => setBestCardMaxAttemptsRaw(e.target.value)}
+                              className={inputClassName}
+                              placeholder={t('adminEventsCreate.bestCardMaxAttemptsPlaceholder')}
+                              disabled={saving || loadingEvent}
+                            />
+                          </div>
                         </div>
                       )}
 

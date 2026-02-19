@@ -20,7 +20,7 @@ const buildContext = async (associationId: string | null) => {
   try {
     let query = supabaseAdmin
       .from('events')
-      .select('id, name, event_date, location, association_id')
+      .select('id, name, event_date, association_id')
       .gte('event_date', startIso)
       .order('event_date', { ascending: true })
       .limit(8);
@@ -34,7 +34,7 @@ const buildContext = async (associationId: string | null) => {
       id: String(row.id),
       name: String(row.name || ''),
       event_date: row.event_date ? String(row.event_date) : null,
-      location: row.location ? String(row.location) : null,
+      location: null,
     }));
   } catch {
     events = [];

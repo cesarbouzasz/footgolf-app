@@ -704,7 +704,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const { data: event, error } = await supabaseAdmin
       .from('events')
       .select(
-        'id, association_id, name, status, competition_mode, registration_start, registration_end, event_date, course_id, location, description, config, has_handicap_ranking, registered_player_ids, created_by'
+        'id, association_id, name, status, competition_mode, registration_start, registration_end, event_date, course_id, description, config, has_handicap_ranking, registered_player_ids, created_by'
       )
       .eq('id', eventId)
       .single();
@@ -800,7 +800,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
 
     const courseIdRaw = typeof body?.course_id === 'string' ? body.course_id.trim() : '';
-    if (courseIdRaw && !isUuid(courseIdRaw)) {
+    if (!courseIdRaw) {
+      return NextResponse.json({ ok: false, error: 'Missing course_id' }, { status: 200 });
+    }
+    if (!isUuid(courseIdRaw)) {
       return NextResponse.json({ ok: false, error: 'Invalid course_id' }, { status: 200 });
     }
 
@@ -1069,7 +1072,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       registration_start: registrationStart ? String(registrationStart) : null,
       registration_end: registrationEnd ? String(registrationEnd) : null,
       event_date: eventDate ? String(eventDate) : null,
-      location: typeof body?.location === 'string' && body.location.trim() ? body.location.trim() : null,
       description: typeof body?.description === 'string' && body.description.trim() ? body.description.trim() : null,
       course_id: courseIdRaw || null,
       config,

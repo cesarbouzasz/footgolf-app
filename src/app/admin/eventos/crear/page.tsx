@@ -15,6 +15,7 @@ type MatchPlayFormat = 'classic' | 'groups';
 type GroupMode = 'single' | 'multi';
 type StablefordMode = 'classic' | 'best_card' | 'best_hole' | 'weekly';
 type PointsMode = 'manual' | 'percent';
+type StartMode = 'tiro' | 'hoyo_intervalo' | 'libre';
 type PriceRow = { category: string; price: string; currency: string };
 type ChampHubEventDraft = {
   eventId: string;
@@ -35,6 +36,21 @@ const selectClassName =
   'w-full rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200';
 const textareaClassName =
   'w-full rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200';
+const STATUS_OPTIONS = [
+  { value: 'inscripcion', label: 'Abierto' },
+  { value: 'en_juego', label: 'En juego' },
+  { value: 'cerrado', label: 'Cerrado' },
+];
+
+const TEMPLATES_STORAGE_KEY = 'adminEventTemplates';
+const LEGACY_TEMPLATE_STORAGE_KEY = 'adminEventTemplate';
+
+type EventTemplateItem = {
+  id: string;
+  name: string;
+  payload: Record<string, unknown>;
+  updatedAt: string;
+};
 
 const buildDefaultChampHubEvent = (): ChampHubEventDraft => ({
   eventId: '',
@@ -115,10 +131,9 @@ export default function AdminCrearEventoPage() {
   const [eventEndDate, setEventEndDate] = useState('');
   const [registrationStart, setRegistrationStart] = useState('');
   const [registrationEnd, setRegistrationEnd] = useState('');
-  const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
   const [courseId, setCourseId] = useState<string>('');
-  const [status, setStatus] = useState<string>('');
+  const [status, setStatus] = useState<string>('inscripcion');
   const [maxPlayersRaw, setMaxPlayersRaw] = useState('');
   const [priceRows, setPriceRows] = useState<PriceRow[]>(() => ([
     { category: CATEGORY_OPTIONS[0], price: '', currency: 'EUR' },
@@ -127,6 +142,11 @@ export default function AdminCrearEventoPage() {
   const [format, setFormat] = useState<EventFormat>('stableford');
   const [teamCompetitionEnabled, setTeamCompetitionEnabled] = useState(false);
   const [teamBestPlayersRaw, setTeamBestPlayersRaw] = useState('');
+
+  const [startMode, setStartMode] = useState<StartMode>('tiro');
+  const [startHoleRaw, setStartHoleRaw] = useState('1');
+  const [startTimeRaw, setStartTimeRaw] = useState('');
+  const [startIntervalRaw, setStartIntervalRaw] = useState('');
 
   const [matchPlayFormat, setMatchPlayFormat] = useState<MatchPlayFormat>('classic');
   const [groupMode, setGroupMode] = useState<GroupMode>('single');
@@ -140,6 +160,7 @@ export default function AdminCrearEventoPage() {
   const [stablefordMode, setStablefordMode] = useState<StablefordMode>('classic');
   const [classicRoundsRaw, setClassicRoundsRaw] = useState('1');
   const [bestCardRoundsRaw, setBestCardRoundsRaw] = useState('2');
+  const [bestCardMaxAttemptsRaw, setBestCardMaxAttemptsRaw] = useState('');
   const [bestHoleRoundsRaw, setBestHoleRoundsRaw] = useState('2');
   const [weeklyAllowExtraAttempts, setWeeklyAllowExtraAttempts] = useState(false);
   const [weeklyMaxAttemptsRaw, setWeeklyMaxAttemptsRaw] = useState('');
@@ -176,6 +197,10 @@ export default function AdminCrearEventoPage() {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  const [showValidation, setShowValidation] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [templates, setTemplates] = useState<EventTemplateItem[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
 
   useEffect(() => {
     document.body.classList.add('premium-admin-bg');
@@ -246,10 +271,60 @@ export default function AdminCrearEventoPage() {
     };
   }, [currentAssociationId]);
 
+  useEffect(() => {
+    const safeParse = (value: string | null) => {
+      if (!value) return [] as EventTemplateItem[];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? (parsed as EventTemplateItem[]) : [];
+      } catch {
+        return [] as EventTemplateItem[];
+      }
+    };
+
+    const normalize = (items: EventTemplateItem[]) =>
+      items
+        .filter((item) => item && typeof item === 'object')
+        .map((item) => ({
+          id: String(item.id || ''),
+          name: String(item.name || ''),
+          payload: (item.payload || {}) as Record<string, unknown>,
+          updatedAt: String(item.updatedAt || ''),
+        }))
+        .filter((item) => item.id && item.name);
+
+    let items = normalize(safeParse(localStorage.getItem(TEMPLATES_STORAGE_KEY)));
+    if (!items.length) {
+      const legacyRaw = localStorage.getItem(LEGACY_TEMPLATE_STORAGE_KEY);
+      if (legacyRaw) {
+        try {
+          const legacyPayload = JSON.parse(legacyRaw) || {};
+          items = [
+            {
+              id: String(Date.now()),
+              name: t('adminEventsCreate.templateLegacyName'),
+              payload: legacyPayload,
+              updatedAt: new Date().toISOString(),
+            },
+          ];
+          localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(items));
+        } catch {
+          items = [];
+        }
+      }
+    }
+
+    setTemplates(items);
+    if (!selectedTemplateId && items.length) {
+      setSelectedTemplateId(items[0].id);
+    }
+  }, [selectedTemplateId, t]);
+
   const canSave = useMemo(() => {
     if (!currentAssociationId) return false;
     if (!name.trim()) return false;
     if (!isIsoDate(eventDate)) return false;
+    if (!courseId.trim()) return false;
     if (eventEndDate && !isIsoDate(eventEndDate)) return false;
     if (eventEndDate && isIsoDate(eventDate) && eventEndDate < eventDate) return false;
     if (registrationStart && !isIsoDate(registrationStart)) return false;
@@ -263,6 +338,14 @@ export default function AdminCrearEventoPage() {
     if (teamCompetitionEnabled && teamBestPlayersRaw.trim()) {
       const n = Number.parseInt(teamBestPlayersRaw, 10);
       if (!Number.isFinite(n) || n < 1) return false;
+    }
+
+    if (startMode === 'hoyo_intervalo') {
+      const hole = Number.parseInt(startHoleRaw, 10);
+      const interval = Number.parseInt(startIntervalRaw, 10);
+      if (!startTimeRaw.trim()) return false;
+      if (!Number.isFinite(hole) || hole < 1 || hole > 36) return false;
+      if (!Number.isFinite(interval) || interval < 1) return false;
     }
 
     if (format === 'stableford') {
@@ -283,7 +366,11 @@ export default function AdminCrearEventoPage() {
         }
       } else if (stablefordMode === 'best_card') {
         const rounds = Number.parseInt(bestCardRoundsRaw, 10);
-        if (!Number.isFinite(rounds) || rounds < 2) return false;
+        if (!Number.isFinite(rounds) || rounds < 1) return false;
+        if (bestCardMaxAttemptsRaw.trim()) {
+          const maxAttempts = Number.parseInt(bestCardMaxAttemptsRaw, 10);
+          if (!Number.isFinite(maxAttempts) || maxAttempts < 1) return false;
+        }
       } else if (stablefordMode === 'best_hole') {
         const rounds = Number.parseInt(bestHoleRoundsRaw, 10);
         if (!Number.isFinite(rounds) || rounds < 2) return false;
@@ -377,11 +464,219 @@ export default function AdminCrearEventoPage() {
     }
 
     return true;
-  }, [currentAssociationId, name, eventDate, eventEndDate, registrationStart, registrationEnd, maxPlayersRaw, teamCompetitionEnabled, teamBestPlayersRaw, format, matchPlayFormat, holesPerRoundRaw, hasConsolation, consolationHolesPerRoundRaw, hasSeeds, seedCountRaw, groupMode, groupHolesRaw, groupMatchesPerDayRaw, groupDatesRaw, groupCountRaw, groupAdvanceRaw, stablefordMode, classicRoundsRaw, bestCardRoundsRaw, bestHoleRoundsRaw, weeklyAllowExtraAttempts, weeklyMaxAttemptsRaw, pointsMode, pointsFirstRaw, pointsDecayRaw, pointsPodiumRaw, pointsTableRaw, champEnabled, champTotalRaw, champSimpleRaw, champDoubleRaw, champBestSimpleRaw, champBestDoubleRaw, champCategories, champHubEnabled, champHubCategories, champHubEvents]);
+  }, [currentAssociationId, name, eventDate, eventEndDate, registrationStart, registrationEnd, courseId, maxPlayersRaw, teamCompetitionEnabled, teamBestPlayersRaw, startMode, startHoleRaw, startTimeRaw, startIntervalRaw, format, matchPlayFormat, holesPerRoundRaw, hasConsolation, consolationHolesPerRoundRaw, hasSeeds, seedCountRaw, groupMode, groupHolesRaw, groupMatchesPerDayRaw, groupDatesRaw, groupCountRaw, groupAdvanceRaw, stablefordMode, classicRoundsRaw, bestCardRoundsRaw, bestCardMaxAttemptsRaw, bestHoleRoundsRaw, weeklyAllowExtraAttempts, weeklyMaxAttemptsRaw, pointsMode, pointsFirstRaw, pointsDecayRaw, pointsPodiumRaw, pointsTableRaw, champEnabled, champTotalRaw, champSimpleRaw, champDoubleRaw, champBestSimpleRaw, champBestDoubleRaw, champCategories, champHubEnabled, champHubCategories, champHubEvents]);
+
+  const validation = useMemo(() => {
+    const endDateInvalid = !!eventEndDate && (!isIsoDate(eventEndDate) || (isIsoDate(eventDate) && eventEndDate < eventDate));
+    const registrationStartInvalid = !!registrationStart && !isIsoDate(registrationStart);
+    const registrationEndInvalid = !!registrationEnd && !isIsoDate(registrationEnd);
+
+    let maxPlayersInvalid = false;
+    if (maxPlayersRaw.trim()) {
+      const n = Number.parseInt(maxPlayersRaw, 10);
+      maxPlayersInvalid = !Number.isFinite(n) || n < 2 || n > 256;
+    }
+
+    let teamBestPlayersInvalid = false;
+    if (teamCompetitionEnabled && teamBestPlayersRaw.trim()) {
+      const n = Number.parseInt(teamBestPlayersRaw, 10);
+      teamBestPlayersInvalid = !Number.isFinite(n) || n < 1;
+    }
+
+    let startModeInvalid = false;
+    if (startMode === 'hoyo_intervalo') {
+      const hole = Number.parseInt(startHoleRaw, 10);
+      const interval = Number.parseInt(startIntervalRaw, 10);
+      startModeInvalid = !startTimeRaw.trim() || !Number.isFinite(hole) || hole < 1 || hole > 36 || !Number.isFinite(interval) || interval < 1;
+    }
+
+    return {
+      nameMissing: !name.trim(),
+      courseMissing: !courseId.trim(),
+      eventDateInvalid: !isIsoDate(eventDate),
+      endDateInvalid,
+      registrationStartInvalid,
+      registrationEndInvalid,
+      maxPlayersInvalid,
+      teamBestPlayersInvalid,
+      startModeInvalid,
+    };
+  }, [courseId, eventDate, eventEndDate, maxPlayersRaw, name, registrationEnd, registrationStart, startHoleRaw, startIntervalRaw, startMode, startTimeRaw, teamBestPlayersRaw, teamCompetitionEnabled]);
+
+  const withError = (base: string, hasError: boolean) =>
+    hasError ? `${base} border-red-400 focus:ring-red-200` : base;
+
+  const saveTemplate = () => {
+    const trimmedTemplateName = templateName.trim();
+    if (!trimmedTemplateName) {
+      setErrorMsg(t('adminEventsCreate.templateNameMissing'));
+      setOkMsg(null);
+      return;
+    }
+
+    const payload = {
+      format,
+      status,
+      description,
+      courseId,
+      maxPlayersRaw,
+      priceRows,
+      teamCompetitionEnabled,
+      teamBestPlayersRaw,
+      startMode,
+      startHoleRaw,
+      startTimeRaw,
+      startIntervalRaw,
+      matchPlayFormat,
+      groupMode,
+      groupHolesRaw,
+      groupMatchesPerDayRaw,
+      groupDatesRaw,
+      groupCountRaw,
+      groupAdvanceRaw,
+      groupHasConsolation,
+      holesPerRoundRaw,
+      hasConsolation,
+      consolationHolesPerRoundRaw,
+      hasSeeds,
+      seedCountRaw,
+      stablefordMode,
+      classicRoundsRaw,
+      bestCardRoundsRaw,
+      bestCardMaxAttemptsRaw,
+      bestHoleRoundsRaw,
+      weeklyAllowExtraAttempts,
+      weeklyMaxAttemptsRaw,
+      pointsMode,
+      pointsFirstRaw,
+      pointsDecayRaw,
+      pointsPodiumRaw,
+      pointsTableRaw,
+      champEnabled,
+      champTotalRaw,
+      champSimpleRaw,
+      champDoubleRaw,
+      champBestSimpleRaw,
+      champBestDoubleRaw,
+      champCategories,
+      champHubEnabled,
+      champHubCategories,
+      champHubEvents,
+    };
+
+    const now = new Date().toISOString();
+    const nextTemplates = templates.slice();
+    const existingIndex = nextTemplates.findIndex(
+      (item) => item.name.toLowerCase() === trimmedTemplateName.toLowerCase()
+    );
+    if (existingIndex >= 0) {
+      nextTemplates[existingIndex] = {
+        ...nextTemplates[existingIndex],
+        name: trimmedTemplateName,
+        payload,
+        updatedAt: now,
+      };
+      setSelectedTemplateId(nextTemplates[existingIndex].id);
+    } else {
+      const newItem = {
+        id: String(Date.now()),
+        name: trimmedTemplateName,
+        payload,
+        updatedAt: now,
+      };
+      nextTemplates.unshift(newItem);
+      setSelectedTemplateId(newItem.id);
+    }
+
+    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(nextTemplates));
+    setTemplates(nextTemplates);
+    setOkMsg(t(existingIndex >= 0
+      ? 'adminEventsCreate.templateUpdated'
+      : 'adminEventsCreate.templateSaved'));
+    setErrorMsg(null);
+  };
+
+  const loadTemplate = () => {
+    if (!selectedTemplateId) {
+      setErrorMsg(t('adminEventsCreate.templateSelectMissing'));
+      setOkMsg(null);
+      return;
+    }
+
+    try {
+      const template = templates.find((item) => item.id === selectedTemplateId);
+      if (!template) {
+        setErrorMsg(t('adminEventsCreate.templateMissing'));
+        setOkMsg(null);
+        return;
+      }
+
+      const data = template.payload || {};
+      setFormat(data.format || 'stableford');
+      setStatus(data.status || 'inscripcion');
+      setDescription(data.description || '');
+      setCourseId(data.courseId || '');
+      setMaxPlayersRaw(data.maxPlayersRaw || '');
+      setPriceRows(Array.isArray(data.priceRows) && data.priceRows.length ? data.priceRows : [{ category: CATEGORY_OPTIONS[0], price: '', currency: 'EUR' }]);
+      setTeamCompetitionEnabled(!!data.teamCompetitionEnabled);
+      setTeamBestPlayersRaw(data.teamBestPlayersRaw || '');
+      setStartMode(data.startMode || 'tiro');
+      setStartHoleRaw(data.startHoleRaw || '1');
+      setStartTimeRaw(data.startTimeRaw || '');
+      setStartIntervalRaw(data.startIntervalRaw || '');
+      setMatchPlayFormat(data.matchPlayFormat || 'classic');
+      setGroupMode(data.groupMode || 'single');
+      setGroupHolesRaw(data.groupHolesRaw || '18');
+      setGroupMatchesPerDayRaw(data.groupMatchesPerDayRaw || '');
+      setGroupDatesRaw(data.groupDatesRaw || '');
+      setGroupCountRaw(data.groupCountRaw || '');
+      setGroupAdvanceRaw(data.groupAdvanceRaw || '');
+      setGroupHasConsolation(!!data.groupHasConsolation);
+      setHolesPerRoundRaw(data.holesPerRoundRaw || '18');
+      setHasConsolation(!!data.hasConsolation);
+      setConsolationHolesPerRoundRaw(data.consolationHolesPerRoundRaw || '');
+      setHasSeeds(!!data.hasSeeds);
+      setSeedCountRaw(data.seedCountRaw || '');
+      setStablefordMode(data.stablefordMode || 'classic');
+      setClassicRoundsRaw(data.classicRoundsRaw || '1');
+      setBestCardRoundsRaw(data.bestCardRoundsRaw || '2');
+      setBestCardMaxAttemptsRaw(data.bestCardMaxAttemptsRaw || '');
+      setBestHoleRoundsRaw(data.bestHoleRoundsRaw || '2');
+      setWeeklyAllowExtraAttempts(!!data.weeklyAllowExtraAttempts);
+      setWeeklyMaxAttemptsRaw(data.weeklyMaxAttemptsRaw || '');
+      setPointsMode(data.pointsMode || 'percent');
+      setPointsFirstRaw(data.pointsFirstRaw || '100');
+      setPointsDecayRaw(data.pointsDecayRaw || '8');
+      setPointsPodiumRaw(data.pointsPodiumRaw || '3');
+      setPointsTableRaw(data.pointsTableRaw || '');
+      setChampEnabled(!!data.champEnabled);
+      setChampTotalRaw(data.champTotalRaw || '');
+      setChampSimpleRaw(data.champSimpleRaw || '');
+      setChampDoubleRaw(data.champDoubleRaw || '');
+      setChampBestSimpleRaw(data.champBestSimpleRaw || '');
+      setChampBestDoubleRaw(data.champBestDoubleRaw || '');
+      setChampCategories(Array.isArray(data.champCategories) && data.champCategories.length ? data.champCategories : CATEGORY_OPTIONS);
+      setChampHubEnabled(!!data.champHubEnabled);
+      setChampHubCategories(Array.isArray(data.champHubCategories) && data.champHubCategories.length ? data.champHubCategories : CATEGORY_OPTIONS);
+      setChampHubEvents(Array.isArray(data.champHubEvents) ? data.champHubEvents : []);
+      // Always clear name and date fields when loading a template.
+      setName('');
+      setEventDate('');
+      setEventEndDate('');
+      setRegistrationStart('');
+      setRegistrationEnd('');
+      setOkMsg(t('adminEventsCreate.templateLoaded'));
+      setErrorMsg(null);
+    } catch {
+      setErrorMsg(t('adminEventsCreate.templateMissing'));
+      setOkMsg(null);
+    }
+  };
 
   const save = async () => {
     setErrorMsg(null);
     setOkMsg(null);
+    setShowValidation(true);
 
     if (!currentAssociationId) {
       setErrorMsg(t('adminEventsCreate.errors.selectAssociation'));
@@ -391,6 +686,10 @@ export default function AdminCrearEventoPage() {
     const trimmedName = name.trim();
     if (!trimmedName) {
       setErrorMsg(t('adminEventsCreate.errors.nameRequired'));
+      return;
+    }
+    if (!courseId.trim()) {
+      setErrorMsg(t('adminEventsCreate.errors.courseRequired'));
       return;
     }
     if (!isIsoDate(eventDate)) {
@@ -415,6 +714,15 @@ export default function AdminCrearEventoPage() {
       return;
     }
 
+    if (startMode === 'hoyo_intervalo') {
+      const hole = Number.parseInt(startHoleRaw, 10);
+      const interval = Number.parseInt(startIntervalRaw, 10);
+      if (!startTimeRaw.trim() || !Number.isFinite(hole) || hole < 1 || hole > 36 || !Number.isFinite(interval) || interval < 1) {
+        setErrorMsg(t('adminEventsCreate.errors.startModeInvalid'));
+        return;
+      }
+    }
+
     let maxPlayers: number | null = null;
     if (maxPlayersRaw.trim()) {
       const n = Number.parseInt(maxPlayersRaw, 10);
@@ -432,6 +740,17 @@ export default function AdminCrearEventoPage() {
     if (teamCompetitionEnabled && teamBestPlayersRaw.trim()) {
       const n = Number.parseInt(teamBestPlayersRaw, 10);
       config.teamBestPlayers = Number.isFinite(n) && n > 0 ? n : null;
+    }
+
+    if (startMode === 'hoyo_intervalo') {
+      config.starting = {
+        mode: 'hoyo_intervalo',
+        startHole: Number.parseInt(startHoleRaw, 10),
+        startTime: startTimeRaw.trim(),
+        intervalMinutes: Number.parseInt(startIntervalRaw, 10),
+      };
+    } else {
+      config.starting = { mode: startMode };
     }
 
     const normalizedPrices = priceRows
@@ -463,6 +782,9 @@ export default function AdminCrearEventoPage() {
         mode: stablefordMode,
         classicRounds: Number.isFinite(classicRounds) ? classicRounds : null,
         bestCardRounds: Number.isFinite(bestCardRounds) ? bestCardRounds : null,
+        bestCardMaxAttempts: bestCardMaxAttemptsRaw.trim()
+          ? Number.parseInt(bestCardMaxAttemptsRaw, 10)
+          : null,
         bestHoleRounds: Number.isFinite(bestHoleRounds) ? bestHoleRounds : null,
         weekly: stablefordMode === 'weekly'
           ? {
@@ -580,7 +902,6 @@ export default function AdminCrearEventoPage() {
           registration_end: registrationEnd || null,
           competition_mode: competitionMode,
           status: status.trim() || null,
-          location: location.trim() || null,
           description: description.trim() || null,
           course_id: courseId.trim() || null,
           has_handicap_ranking: false,
@@ -595,9 +916,9 @@ export default function AdminCrearEventoPage() {
       }
 
       setOkMsg(t('adminEventsCreate.created'));
+      setShowValidation(false);
       setName('');
-      setStatus('');
-      setLocation('');
+      setStatus('inscripcion');
       setDescription('');
       setCourseId('');
       setMaxPlayersRaw('');
@@ -606,9 +927,14 @@ export default function AdminCrearEventoPage() {
       setFormat('stableford');
       setTeamCompetitionEnabled(false);
       setTeamBestPlayersRaw('');
+      setStartMode('tiro');
+      setStartHoleRaw('1');
+      setStartTimeRaw('');
+      setStartIntervalRaw('');
       setStablefordMode('classic');
       setClassicRoundsRaw('1');
       setBestCardRoundsRaw('2');
+      setBestCardMaxAttemptsRaw('');
       setBestHoleRoundsRaw('2');
       setWeeklyAllowExtraAttempts(false);
       setWeeklyMaxAttemptsRaw('');
@@ -657,13 +983,13 @@ export default function AdminCrearEventoPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-sm text-gray-800">
-          {t('common.noSession')}{' '}
+                  {t('adminEventsCreate.courseLabel')} <span className="text-red-500">**</span>
           <Link href="/login" className="text-blue-600">
             {t('common.login')}
           </Link>
         </div>
       </div>
-    );
+                  className={withError(selectClassName, showValidation && validation.courseMissing)}
   }
 
   if (!isAdmin) {
@@ -706,27 +1032,57 @@ export default function AdminCrearEventoPage() {
             {okMsg && <div className="text-sm text-emerald-700">{okMsg}</div>}
 
             <div className="grid gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+                <div className="space-y-1">
+                  <div className="text-xs text-gray-500">{t('adminEventsCreate.templateSelectLabel')}</div>
+                  <select
+                    value={selectedTemplateId}
+                    onChange={(e) => setSelectedTemplateId(e.target.value)}
+                    disabled={saving}
+                    className={selectClassName}
+                  >
+                    <option value="">{t('adminEventsCreate.templateSelectPlaceholder')}</option>
+                    {templates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadTemplate}
+                  disabled={saving}
+                  className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700"
+                >
+                  {t('adminEventsCreate.templateLoad')}
+                </button>
+              </div>
               <div className="space-y-1">
-                <div className="text-xs text-gray-500">{t('adminEventsCreate.nameLabel')}</div>
+                <div className="text-xs text-gray-500">
+                  {t('adminEventsCreate.nameLabel')} <span className="text-red-500">**</span>
+                </div>
                 <input
                   ref={nameRef}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   disabled={saving}
-                  className={inputClassName}
+                  className={withError(inputClassName, showValidation && validation.nameMissing)}
                   placeholder={t('adminEventsCreate.namePlaceholder')}
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <div className="text-xs text-gray-500">{t('adminEventsCreate.startDateLabel')}</div>
+                  <div className="text-xs text-gray-500">
+                    {t('adminEventsCreate.startDateLabel')} <span className="text-red-500">**</span>
+                  </div>
                   <input
                     type="date"
                     value={eventDate}
                     onChange={(e) => setEventDate(e.target.value)}
                     disabled={saving}
-                    className={inputClassName}
+                    className={withError(inputClassName, showValidation && validation.eventDateInvalid)}
                   />
                 </div>
 
@@ -737,7 +1093,7 @@ export default function AdminCrearEventoPage() {
                     value={eventEndDate}
                     onChange={(e) => setEventEndDate(e.target.value)}
                     disabled={saving}
-                    className={inputClassName}
+                    className={withError(inputClassName, showValidation && validation.endDateInvalid)}
                   />
                 </div>
 
@@ -774,11 +1130,62 @@ export default function AdminCrearEventoPage() {
                       value={teamBestPlayersRaw}
                       onChange={(e) => setTeamBestPlayersRaw(e.target.value)}
                       disabled={saving}
-                      className={inputClassName}
+                      className={withError(inputClassName, showValidation && validation.teamBestPlayersInvalid)}
                       placeholder={t('adminEventsCreate.teamBestPlayersPlaceholder')}
                     />
                   </div>
                 )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs text-gray-500">{t('adminEventsCreate.startModeLabel')}</div>
+                <select
+                  value={startMode}
+                  onChange={(e) => setStartMode(e.target.value as StartMode)}
+                  disabled={saving}
+                  className={withError(selectClassName, showValidation && validation.startModeInvalid)}
+                >
+                  <option value="tiro">{t('adminEventsCreate.startModeShotgun')}</option>
+                  <option value="hoyo_intervalo">{t('adminEventsCreate.startModeIntervals')}</option>
+                  <option value="libre">{t('adminEventsCreate.startModeFree')}</option>
+                </select>
+                {startMode === 'hoyo_intervalo' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-gray-500">{t('adminEventsCreate.startHoleLabel')}</div>
+                      <input
+                        inputMode="numeric"
+                        value={startHoleRaw}
+                        onChange={(e) => setStartHoleRaw(e.target.value)}
+                        disabled={saving}
+                        className={withError(inputClassName, showValidation && validation.startModeInvalid)}
+                        placeholder="1"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-gray-500">{t('adminEventsCreate.startTimeLabel')}</div>
+                      <input
+                        type="time"
+                        value={startTimeRaw}
+                        onChange={(e) => setStartTimeRaw(e.target.value)}
+                        disabled={saving}
+                        className={withError(inputClassName, showValidation && validation.startModeInvalid)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-gray-500">{t('adminEventsCreate.startIntervalLabel')}</div>
+                      <input
+                        inputMode="numeric"
+                        value={startIntervalRaw}
+                        onChange={(e) => setStartIntervalRaw(e.target.value)}
+                        disabled={saving}
+                        className={withError(inputClassName, showValidation && validation.startModeInvalid)}
+                        placeholder="10"
+                      />
+                    </div>
+                  </div>
+                )}
+                <div className="text-[11px] text-gray-500">{t('adminEventsCreate.startModeHint')}</div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -789,7 +1196,7 @@ export default function AdminCrearEventoPage() {
                     value={registrationStart}
                     onChange={(e) => setRegistrationStart(e.target.value)}
                     disabled={saving}
-                    className={inputClassName}
+                    className={withError(inputClassName, showValidation && validation.registrationStartInvalid)}
                   />
                 </div>
                 <div className="space-y-1">
@@ -799,7 +1206,7 @@ export default function AdminCrearEventoPage() {
                     value={registrationEnd}
                     onChange={(e) => setRegistrationEnd(e.target.value)}
                     disabled={saving}
-                    className={inputClassName}
+                    className={withError(inputClassName, showValidation && validation.registrationEndInvalid)}
                   />
                 </div>
               </div>
@@ -825,40 +1232,32 @@ export default function AdminCrearEventoPage() {
 
                 <div className="space-y-1">
                   <div className="text-xs text-gray-500">{t('adminEventsCreate.statusLabel')}</div>
-                  <input
+                  <select
                     value={status}
                     onChange={(e) => setStatus(e.target.value)}
                     disabled={saving}
-                    className={inputClassName}
-                    placeholder={t('adminEventsCreate.statusPlaceholder')}
-                  />
+                    className={selectClassName}
+                  >
+                    {STATUS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <div className="text-xs text-gray-500">{t('adminEventsCreate.locationLabel')}</div>
-                  <input
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    disabled={saving}
-                    className={inputClassName}
-                    placeholder={t('adminEventsCreate.locationPlaceholder')}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="text-xs text-gray-500">{t('adminEventsCreate.maxPlayersLabel')}</div>
-                  <input
-                    inputMode="numeric"
-                    value={maxPlayersRaw}
-                    onChange={(e) => setMaxPlayersRaw(e.target.value)}
-                    disabled={saving}
-                    className={inputClassName}
-                    placeholder={t('adminEventsCreate.maxPlayersPlaceholder')}
-                  />
-                  <div className="text-[11px] text-gray-500">{t('adminEventsCreate.maxPlayersHint')}</div>
-                </div>
+              <div className="space-y-1">
+                <div className="text-xs text-gray-500">{t('adminEventsCreate.maxPlayersLabel')}</div>
+                <input
+                  inputMode="numeric"
+                  value={maxPlayersRaw}
+                  onChange={(e) => setMaxPlayersRaw(e.target.value)}
+                  disabled={saving}
+                  className={withError(inputClassName, showValidation && validation.maxPlayersInvalid)}
+                  placeholder={t('adminEventsCreate.maxPlayersPlaceholder')}
+                />
+                <div className="text-[11px] text-gray-500">{t('adminEventsCreate.maxPlayersHint')}</div>
               </div>
 
               <div className="space-y-2">
@@ -986,15 +1385,27 @@ export default function AdminCrearEventoPage() {
                     )}
 
                     {stablefordMode === 'best_card' && (
-                      <div className="space-y-1">
-                        <div className="text-xs text-gray-500">{t('adminEventsCreate.roundsCountLabel')}</div>
-                        <input
-                          value={bestCardRoundsRaw}
-                          onChange={(e) => setBestCardRoundsRaw(e.target.value)}
-                          disabled={saving}
-                          className={inputClassName}
-                          placeholder={t('adminEventsCreate.roundsMinPlaceholder')}
-                        />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <div className="text-xs text-gray-500">{t('adminEventsCreate.roundsCountLabel')}</div>
+                          <input
+                            value={bestCardRoundsRaw}
+                            onChange={(e) => setBestCardRoundsRaw(e.target.value)}
+                            disabled={saving}
+                            className={inputClassName}
+                            placeholder={t('adminEventsCreate.roundsMinPlaceholder')}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs text-gray-500">{t('adminEventsCreate.bestCardMaxAttemptsLabel')}</div>
+                          <input
+                            value={bestCardMaxAttemptsRaw}
+                            onChange={(e) => setBestCardMaxAttemptsRaw(e.target.value)}
+                            disabled={saving}
+                            className={inputClassName}
+                            placeholder={t('adminEventsCreate.bestCardMaxAttemptsPlaceholder')}
+                          />
+                        </div>
                       </div>
                     )}
 
@@ -1586,6 +1997,26 @@ export default function AdminCrearEventoPage() {
                 >
                   {saving ? t('adminEventsCreate.saving') : t('adminEventsCreate.createButton')}
                 </button>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <div className="space-y-1">
+                    <div className="text-[11px] text-gray-500">{t('adminEventsCreate.templateNameLabel')}</div>
+                    <input
+                      value={templateName}
+                      onChange={(e) => setTemplateName(e.target.value)}
+                      disabled={saving}
+                      className={inputClassName}
+                      placeholder={t('adminEventsCreate.templateNamePlaceholder')}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={saveTemplate}
+                    disabled={saving}
+                    className="px-4 py-2 rounded-xl text-sm bg-white border border-gray-200 text-gray-700"
+                  >
+                    {t('adminEventsCreate.templateSave')}
+                  </button>
+                </div>
                 <Link
                   href="/admin/eventos"
                   className="px-4 py-2 rounded-xl text-sm bg-white border border-gray-200 text-gray-700"
