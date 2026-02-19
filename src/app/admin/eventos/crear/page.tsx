@@ -320,6 +320,17 @@ export default function AdminCrearEventoPage() {
     }
   }, [selectedTemplateId, t]);
 
+  useEffect(() => {
+    if (!selectedTemplateId) {
+      if (templateName) setTemplateName('');
+      return;
+    }
+    const selected = templates.find((item) => item.id === selectedTemplateId);
+    if (selected && selected.name !== templateName) {
+      setTemplateName(selected.name);
+    }
+  }, [selectedTemplateId, templateName, templates]);
+
   const canSave = useMemo(() => {
     if (!currentAssociationId) return false;
     if (!name.trim()) return false;
@@ -671,6 +682,74 @@ export default function AdminCrearEventoPage() {
       setErrorMsg(t('adminEventsCreate.templateMissing'));
       setOkMsg(null);
     }
+  };
+
+  const renameTemplate = () => {
+    if (!selectedTemplateId) {
+      setErrorMsg(t('adminEventsCreate.templateSelectMissing'));
+      setOkMsg(null);
+      return;
+    }
+
+    const trimmedName = templateName.trim();
+    if (!trimmedName) {
+      setErrorMsg(t('adminEventsCreate.templateNameMissing'));
+      setOkMsg(null);
+      return;
+    }
+
+    const index = templates.findIndex((item) => item.id === selectedTemplateId);
+    if (index < 0) {
+      setErrorMsg(t('adminEventsCreate.templateMissing'));
+      setOkMsg(null);
+      return;
+    }
+
+    const nameTaken = templates.some(
+      (item) => item.id !== selectedTemplateId && item.name.toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (nameTaken) {
+      setErrorMsg(t('adminEventsCreate.templateNameExists'));
+      setOkMsg(null);
+      return;
+    }
+
+    const nextTemplates = templates.slice();
+    nextTemplates[index] = {
+      ...nextTemplates[index],
+      name: trimmedName,
+      updatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(nextTemplates));
+    setTemplates(nextTemplates);
+    setOkMsg(t('adminEventsCreate.templateRenamed'));
+    setErrorMsg(null);
+  };
+
+  const deleteTemplate = () => {
+    if (!selectedTemplateId) {
+      setErrorMsg(t('adminEventsCreate.templateSelectMissing'));
+      setOkMsg(null);
+      return;
+    }
+
+    const selected = templates.find((item) => item.id === selectedTemplateId);
+    if (!selected) {
+      setErrorMsg(t('adminEventsCreate.templateMissing'));
+      setOkMsg(null);
+      return;
+    }
+
+    if (!window.confirm(t('adminEventsCreate.templateDeleteConfirm').replace('{name}', selected.name))) {
+      return;
+    }
+
+    const nextTemplates = templates.filter((item) => item.id !== selectedTemplateId);
+    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(nextTemplates));
+    setTemplates(nextTemplates);
+    setSelectedTemplateId(nextTemplates[0]?.id || '');
+    setOkMsg(t('adminEventsCreate.templateDeleted'));
+    setErrorMsg(null);
   };
 
   const save = async () => {
@@ -1048,14 +1127,32 @@ export default function AdminCrearEventoPage() {
                     ))}
                   </select>
                 </div>
-                <button
-                  type="button"
-                  onClick={loadTemplate}
-                  disabled={saving}
-                  className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700"
-                >
-                  {t('adminEventsCreate.templateLoad')}
-                </button>
+                <div className="flex flex-wrap gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={loadTemplate}
+                    disabled={saving}
+                    className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700"
+                  >
+                    {t('adminEventsCreate.templateLoad')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={renameTemplate}
+                    disabled={saving}
+                    className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700"
+                  >
+                    {t('adminEventsCreate.templateRename')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={deleteTemplate}
+                    disabled={saving}
+                    className="px-3 py-2 rounded-xl text-xs bg-white border border-red-200 text-red-700"
+                  >
+                    {t('adminEventsCreate.templateDelete')}
+                  </button>
+                </div>
               </div>
               <div className="space-y-1">
                 <div className="text-xs text-gray-500">

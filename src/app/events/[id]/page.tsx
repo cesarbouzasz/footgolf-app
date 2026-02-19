@@ -552,11 +552,6 @@ export default function EventDetailPage() {
     return Number(attemptsByUser?.[user.id] || 0);
   }, [attemptsByUser, user]);
 
-  const currentMaxAttempts = useMemo(() => {
-    if (!user) return null;
-    return getMaxAttemptsForUser(user.id);
-  }, [stablefordConfig, user]);
-
   const getMaxAttemptsForUser = (userId: string) => {
     const mode = String(stablefordConfig?.mode || '').toLowerCase();
     if (mode === 'weekly') {
@@ -573,6 +568,11 @@ export default function EventDetailPage() {
     }
     return null;
   };
+
+  const currentMaxAttempts = useMemo(() => {
+    if (!user) return null;
+    return getMaxAttemptsForUser(user.id);
+  }, [stablefordConfig, user]);
 
   const championshipConfig = useMemo(() => {
     return (event?.config as any)?.championship || null;
