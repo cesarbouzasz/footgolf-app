@@ -302,11 +302,22 @@ const isBetween = (value: Date, start?: Date | null, end?: Date | null) => {
   return value >= start && value <= end;
 };
 
+const isRegistrationOpenAt = (value: Date, start?: Date | null, end?: Date | null) => {
+  if (!start && !end) return true;
+  if (start && !end) return value >= start;
+  if (!start && end) return value <= end;
+  return isBetween(value, start, end);
+};
+
 export default function EventDetailPage() {
   const params = useParams();
   const eventId = params?.id as string | undefined;
-  const { user, isAdmin } = useAuth();
+  const { user, profile, isAdmin, currentAssociationId } = useAuth();
   const { t } = useLanguage();
+  const ownDisplayName = useMemo(() => {
+    const value = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim();
+    return value || '';
+  }, [profile?.first_name, profile?.last_name]);
 
   const bracketLabels = useMemo<BracketLabels>(() => ({
     placeholder: t('common.notAvailable'),
@@ -337,6 +348,87 @@ export default function EventDetailPage() {
   const [profileNameById, setProfileNameById] = useState<Record<string, string>>({});
   const [profileCategoryById, setProfileCategoryById] = useState<Record<string, string | null>>({});
 
+  const loadProfilesByIds = async (ids: string[], includeTeam: boolean) => {
+    const targetIds = uniq(ids);
+    if (targetIds.length === 0) return [] as any[];
+
+    const profileColumns = includeTeam
+      ? 'id, first_name, last_name, category, team'
+      : 'id, first_name, last_name, category';
+
+    const normalizeProfileRow = (row: any) => ({
+      id: String(row?.id || ''),
+      first_name: row?.first_name || null,
+      last_name: row?.last_name || null,
+      category: row?.category || null,
+      team: includeTeam ? (row?.team || null) : null,
+    });
+
+    const shouldQueryProfiles = !(user?.id && targetIds.length === 1 && targetIds[0] === user.id);
+    let directRows: any[] = [];
+    let missingIds = [...targetIds];
+
+    if (shouldQueryProfiles) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select(profileColumns)
+        .in('id', targetIds);
+
+      if (!error && Array.isArray(data)) {
+        directRows = data.map(normalizeProfileRow).filter((row) => row.id);
+        const foundIds = new Set(directRows.map((row) => row.id));
+        missingIds = targetIds.filter((id) => !foundIds.has(id));
+        if (missingIds.length === 0) {
+          return targetIds.map((id) => directRows.find((row) => row.id === id)).filter(Boolean) as any[];
+        }
+      }
+    }
+
+    try {
+      const headers: Record<string, string> = { ...(await getAuthHeaders()) };
+      const fetchPlayersRows = async (associationId?: string | null) => {
+        const params = new URLSearchParams();
+        if (associationId) params.set('association_id', associationId);
+        const res = await fetch(`/api/players${params.toString() ? `?${params.toString()}` : ''}`, { headers });
+        const json = await res.json().catch(() => null);
+        return Array.isArray(json?.players) ? json.players : [];
+      };
+
+      const byId = new Map<string, any>();
+      const scopedRows = await fetchPlayersRows(currentAssociationId || null);
+      for (const row of scopedRows) {
+        const id = String((row as any)?.id || '').trim();
+        if (id) byId.set(id, row);
+      }
+
+      const unresolvedAfterScoped = missingIds.filter((id) => !byId.has(id));
+      if (unresolvedAfterScoped.length > 0 && currentAssociationId) {
+        const allRows = await fetchPlayersRows(null);
+        for (const row of allRows) {
+          const id = String((row as any)?.id || '').trim();
+          if (id && unresolvedAfterScoped.includes(id)) byId.set(id, row);
+        }
+      }
+
+      const apiRows = missingIds
+        .map((id) => byId.get(id))
+        .filter(Boolean);
+
+      const mergedById = new Map<string, any>();
+      for (const row of directRows) {
+        if (row?.id) mergedById.set(row.id, row);
+      }
+      for (const row of apiRows) {
+        const normalized = normalizeProfileRow(row);
+        if (normalized.id) mergedById.set(normalized.id, normalized);
+      }
+
+      return targetIds.map((id) => mergedById.get(id)).filter(Boolean);
+    } catch {
+      return directRows;
+    }
+  };
+
   useEffect(() => {
     if (!eventId) return;
     let active = true;
@@ -362,13 +454,7 @@ export default function EventDetailPage() {
       const allIds = uniq([...(ids || []), ...waitlistIds, ...finalIds]);
       let regData: RegistrationRow[] = [];
       if (allIds.length > 0) {
-        const profileColumns = teamCompetitionEnabled
-          ? 'id, first_name, last_name, category, team'
-          : 'id, first_name, last_name, category';
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select(profileColumns)
-          .in('id', allIds);
+        const profileData = await loadProfilesByIds(allIds, teamCompetitionEnabled);
 
         const teamNameByPlayerId = new Map<string, string>();
         if (teamCompetitionEnabled) {
@@ -379,10 +465,13 @@ export default function EventDetailPage() {
           }
         }
 
-        const safeProfiles = (profileData as any[]) || [];
+        const safeProfiles = profileData || [];
         const nameMap = new Map(
           safeProfiles.map((row) => [row.id, [row.first_name, row.last_name].filter(Boolean).join(' ')])
         );
+        if (user?.id && ownDisplayName && !nameMap.get(user.id)) {
+          nameMap.set(user.id, ownDisplayName);
+        }
         const categoryMap = new Map(
           safeProfiles.map((row) => [row.id, row.category || null])
         );
@@ -392,7 +481,7 @@ export default function EventDetailPage() {
             if (!id) return acc;
             acc[id] = [row?.first_name, row?.last_name].filter(Boolean).join(' ');
             return acc;
-          }, {})
+          }, user?.id && ownDisplayName ? { [user.id]: ownDisplayName } : {})
         );
         setProfileCategoryById(
           safeProfiles.reduce<Record<string, string | null>>((acc, row) => {
@@ -405,7 +494,7 @@ export default function EventDetailPage() {
 
         const registeredList = (ids || []).map((id) => ({
           user_id: id,
-          name: nameMap.get(id) || t('events.playerFallback'),
+          name: nameMap.get(id) || (id === user?.id ? ownDisplayName : '') || t('events.playerFallback'),
           category: categoryMap.get(id) || null,
           team_name: teamNameByPlayerId.get(id) || null,
           is_waitlist: false,
@@ -415,7 +504,7 @@ export default function EventDetailPage() {
           .filter((id) => !(ids || []).includes(id))
           .map((id) => ({
             user_id: id,
-            name: nameMap.get(id) || t('events.playerFallback'),
+            name: nameMap.get(id) || (id === user?.id ? ownDisplayName : '') || t('events.playerFallback'),
             category: categoryMap.get(id) || null,
             team_name: teamNameByPlayerId.get(id) || null,
             is_waitlist: true,
@@ -437,7 +526,7 @@ export default function EventDetailPage() {
     return () => {
       active = false;
     };
-  }, [eventId]);
+  }, [eventId, ownDisplayName, user?.id]);
 
   const isEventStarted = useMemo(() => {
     const raw = String(event?.status || '').toLowerCase();
@@ -472,6 +561,22 @@ export default function EventDetailPage() {
     return (event?.config as any)?.stableford || null;
   }, [event]);
 
+  const isPrimaryPairsCompetition = useMemo(() => {
+    return String((event?.config as any)?.primaryCompetitionType || '').trim().toLowerCase() === 'parejas';
+  }, [event]);
+
+  const isCopaCanadaMode = useMemo(() => {
+    const mode = String(stablefordConfig?.pairsMode || '').trim().toLowerCase();
+    return isPrimaryPairsCompetition && mode === 'copa_canada';
+  }, [isPrimaryPairsCompetition, stablefordConfig]);
+
+  const getClassificationRoundLabel = (index: number) => {
+    if (isCopaCanadaMode && index < 2) return `J${index + 1}`;
+    return `R${index + 1}`;
+  };
+
+  const classificationTotalLabel = isCopaCanadaMode ? 'Total' : t('events.strokesLabel');
+
   const isAttemptBased = useMemo(() => {
     const mode = String(stablefordConfig?.mode || '').toLowerCase();
     return mode === 'weekly' || mode === 'best_card';
@@ -479,7 +584,7 @@ export default function EventDetailPage() {
 
   const registrationOpen = useMemo(() => {
     const now = new Date();
-    const inWindow = isBetween(now, toDate(event?.registration_start), toDate(event?.registration_end));
+    const inWindow = isRegistrationOpenAt(now, toDate(event?.registration_start), toDate(event?.registration_end));
     if (isAttemptBased) return inWindow;
     return !isEventStarted && inWindow;
   }, [event, isAttemptBased, isEventStarted]);
@@ -745,7 +850,7 @@ export default function EventDetailPage() {
       const diffLabel = diff == null ? '' : diff === 0 ? 'E' : diff > 0 ? `+${diff}` : String(diff);
       return {
         ...row,
-        name: profileName || reg?.name || t('events.playerFallback'),
+        name: profileName || reg?.name || (row.user_id === user?.id ? ownDisplayName : '') || t('events.playerFallback'),
         category: normalizeCategoryLabel(reg?.category || profileCategory || pointsCategory || null),
         team_name: reg?.team_name || null,
         rounds,
@@ -772,7 +877,7 @@ export default function EventDetailPage() {
     });
 
     return rows;
-  }, [classificationRoundCount, coursePar, finalClassification, pointsCategoryByUser, profileCategoryById, profileNameById, registrationByUserId]);
+  }, [classificationRoundCount, coursePar, finalClassification, ownDisplayName, pointsCategoryByUser, profileCategoryById, profileNameById, registrationByUserId, user?.id]);
 
   const registrationClassificationRows = useMemo(() => {
     const rounds = Array.from({ length: classificationRoundCount }, () => 0);
@@ -781,7 +886,7 @@ export default function EventDetailPage() {
       return {
         user_id: reg.user_id,
         position: null as number | null,
-        name: profileName || reg.name || t('events.playerFallback'),
+        name: profileName || reg.name || (reg.user_id === user?.id ? ownDisplayName : '') || t('events.playerFallback'),
         category: normalizeCategoryLabel(reg?.category || null),
         team_name: reg?.team_name || null,
         rounds,
@@ -804,7 +909,7 @@ export default function EventDetailPage() {
     });
 
     return rows;
-  }, [classificationRoundCount, profileNameById, registrations, t]);
+  }, [classificationRoundCount, ownDisplayName, profileNameById, registrations, t, user?.id]);
 
   const handleExportResults = async (format: 'csv' | 'xlsx' | 'pdf', target: 'final' | 'points' | 'championship') => {
     if (!event) return;
@@ -958,13 +1063,8 @@ export default function EventDetailPage() {
     const nextConfig = { ...((event?.config as any) || {}), waitlist_player_ids: nextWaitlist };
 
     setMessage(String(json?.message || t('events.registrationUpdated')));
-    const profileColumns = teamCompetitionEnabled
-      ? 'id, first_name, last_name, category, team'
-      : 'id, first_name, last_name, category';
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select(profileColumns)
-      .in('id', uniq([...nextIds, ...nextWaitlist]));
+    const targetIds = uniq([...nextIds, ...nextWaitlist]);
+    const profileData = await loadProfilesByIds(targetIds, teamCompetitionEnabled);
 
     const teamNameByPlayerId = new Map<string, string>();
     if (teamCompetitionEnabled) {
@@ -974,10 +1074,13 @@ export default function EventDetailPage() {
         if (playerId && name) teamNameByPlayerId.set(playerId, name);
       }
     }
-    const safeProfiles = (profileData as any[]) || [];
+    const safeProfiles = profileData || [];
     const nameMap = new Map(
       safeProfiles.map((row) => [row.id, [row.first_name, row.last_name].filter(Boolean).join(' ')])
     );
+    if (user?.id && ownDisplayName && !nameMap.get(user.id)) {
+      nameMap.set(user.id, ownDisplayName);
+    }
     const categoryMap = new Map(
       safeProfiles.map((row) => [row.id, row.category || null])
     );
@@ -987,7 +1090,7 @@ export default function EventDetailPage() {
         if (!id) return acc;
         acc[id] = [row?.first_name, row?.last_name].filter(Boolean).join(' ');
         return acc;
-      }, {})
+      }, user?.id && ownDisplayName ? { [user.id]: ownDisplayName } : {})
     );
     setProfileCategoryById(
       safeProfiles.reduce<Record<string, string | null>>((acc, row) => {
@@ -1000,7 +1103,7 @@ export default function EventDetailPage() {
 
     const registeredList = nextIds.map((id) => ({
       user_id: id,
-      name: nameMap.get(id) || t('events.playerFallback'),
+      name: nameMap.get(id) || (id === user.id ? ownDisplayName : '') || t('events.playerFallback'),
       category: id === user.id && effectiveCategory ? effectiveCategory : categoryMap.get(id) || null,
       team_name: teamNameByPlayerId.get(id) || null,
       is_waitlist: false,
@@ -1010,7 +1113,7 @@ export default function EventDetailPage() {
       .filter((id) => !nextIds.includes(id))
       .map((id) => ({
         user_id: id,
-        name: nameMap.get(id) || t('events.playerFallback'),
+        name: nameMap.get(id) || (id === user.id ? ownDisplayName : '') || t('events.playerFallback'),
         category: categoryMap.get(id) || null,
         team_name: teamNameByPlayerId.get(id) || null,
         is_waitlist: true,
@@ -1058,13 +1161,7 @@ export default function EventDetailPage() {
     setMessage(String(json?.message || t('events.registrationUpdated')));
 
     const allIds = uniq([...nextIds, ...nextWaitlist]);
-    const profileColumns = teamCompetitionEnabled
-      ? 'id, first_name, last_name, category, team'
-      : 'id, first_name, last_name, category';
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select(profileColumns)
-      .in('id', allIds);
+    const profileData = await loadProfilesByIds(allIds, teamCompetitionEnabled);
 
     const teamNameByPlayerId = new Map<string, string>();
     if (teamCompetitionEnabled) {
@@ -1074,10 +1171,13 @@ export default function EventDetailPage() {
         if (playerId && name) teamNameByPlayerId.set(playerId, name);
       }
     }
-    const safeProfiles = (profileData as any[]) || [];
+    const safeProfiles = profileData || [];
     const nameMap = new Map(
       safeProfiles.map((row) => [row.id, [row.first_name, row.last_name].filter(Boolean).join(' ')])
     );
+    if (user?.id && ownDisplayName && !nameMap.get(user.id)) {
+      nameMap.set(user.id, ownDisplayName);
+    }
     const categoryMap = new Map(safeProfiles.map((row) => [row.id, row.category || null]));
     setProfileNameById(
       safeProfiles.reduce<Record<string, string>>((acc, row) => {
@@ -1085,7 +1185,7 @@ export default function EventDetailPage() {
         if (!id) return acc;
         acc[id] = [row?.first_name, row?.last_name].filter(Boolean).join(' ');
         return acc;
-      }, {})
+      }, user?.id && ownDisplayName ? { [user.id]: ownDisplayName } : {})
     );
     setProfileCategoryById(
       safeProfiles.reduce<Record<string, string | null>>((acc, row) => {
@@ -1098,7 +1198,7 @@ export default function EventDetailPage() {
 
     const registeredList = nextIds.map((id) => ({
       user_id: id,
-      name: nameMap.get(id) || t('events.playerFallback'),
+      name: nameMap.get(id) || (id === user.id ? ownDisplayName : '') || t('events.playerFallback'),
       category: categoryMap.get(id) || null,
       team_name: teamNameByPlayerId.get(id) || null,
       is_waitlist: false,
@@ -1107,7 +1207,7 @@ export default function EventDetailPage() {
       .filter((id) => !nextIds.includes(id))
       .map((id) => ({
         user_id: id,
-        name: nameMap.get(id) || t('events.playerFallback'),
+        name: nameMap.get(id) || (id === user.id ? ownDisplayName : '') || t('events.playerFallback'),
         category: categoryMap.get(id) || null,
         team_name: teamNameByPlayerId.get(id) || null,
         is_waitlist: true,
@@ -1162,20 +1262,19 @@ export default function EventDetailPage() {
             <Link href="/login" className="text-blue-600">Login</Link>
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em] text-amber-700/70">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-10 text-center"></div>
-                <div className="text-left">Nombre</div>
+          <div className="space-y-2 overflow-x-auto">
+            <div className="w-full flex items-center gap-2 text-[11px] text-amber-700/80">
+              <div className="min-w-0 flex-1">
+                <div className="text-left uppercase tracking-[0.12em]">Nombre</div>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5 shrink-0">
                 {Array.from({ length: classificationRoundCount }, (_, rIdx) => (
-                  <div key={`reg-r-${rIdx}`} className="w-9 text-center text-gray-500">
-                    R{rIdx + 1}
+                  <div key={`reg-r-${rIdx}`} className="w-10 text-center text-gray-500">
+                    {getClassificationRoundLabel(rIdx)}
                   </div>
                 ))}
-                <div className="w-12 text-center text-gray-500">{t('events.strokesLabel')}</div>
-                <div className="w-10 text-center text-gray-500">{t('events.scoreLabel')}</div>
+                <div className="w-12 text-center text-gray-500">{classificationTotalLabel}</div>
+                <div className="w-12 text-center text-gray-500">{t('events.scoreLabel')}</div>
               </div>
             </div>
             {filteredRegistrationRows.map((row: any) => {
@@ -1185,29 +1284,24 @@ export default function EventDetailPage() {
               return (
                 <div
                   key={`reg-row-${row.user_id}`}
-                  className="w-full text-left flex items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/85 px-3 py-2"
+                  className="w-full text-left flex items-center gap-2 rounded-2xl border border-white/70 bg-white/85 px-2.5 py-2"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-8 text-center text-sm font-semibold text-gray-900">
-                      {classificationCategoryFilter === ALL_CATEGORIES_VALUE
-                        ? '-'
-                        : (row.categoryPosition ?? '-')}
-                    </div>
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-gray-900 truncate">{row.name}</div>
                       {meta ? <div className="text-xs text-gray-500 truncate">{meta}</div> : null}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     {row.rounds.map((value: any, idx: number) => (
-                      <div key={`reg-r-${row.user_id}-${idx}`} className="w-8 text-center text-xs text-gray-700">
+                      <div key={`reg-r-${row.user_id}-${idx}`} className="w-10 text-center text-xs text-gray-700">
                         {value}
                       </div>
                     ))}
-                    <div className="w-10 text-center text-xs font-semibold text-gray-900">
+                    <div className="w-12 text-center text-xs font-semibold text-gray-900">
                       {row.total}
                     </div>
-                    <div className="w-9 text-center text-xs font-semibold text-gray-900">
+                    <div className="w-12 text-center text-xs font-semibold text-gray-900">
                       {row.diffLabel}
                     </div>
                   </div>
@@ -1228,8 +1322,8 @@ export default function EventDetailPage() {
           <Link href="/login" className="text-blue-600">Login</Link>
         </div>
       ) : (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em] text-amber-700/70">
+        <div className="space-y-2 overflow-x-auto">
+          <div className="min-w-[620px] flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em] text-amber-700/70">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-10 text-center"></div>
               <div className="text-left">Nombre</div>
@@ -1244,13 +1338,13 @@ export default function EventDetailPage() {
                     onClick={() =>
                       setSortMode((prev) => (prev?.type === 'round' && prev.index === rIdx ? null : { type: 'round', index: rIdx }))
                     }
-                    className={`w-9 text-center rounded-full border px-1 py-0.5 transition ${
+                    className={`w-10 text-center rounded-full border px-1 py-0.5 transition ${
                       isSorted
                         ? 'border-amber-300 bg-amber-50 text-amber-800'
                         : 'border-transparent text-gray-500 hover:border-gray-200 hover:bg-gray-50'
                     }`}
                   >
-                    R{rIdx + 1}
+                    {getClassificationRoundLabel(rIdx)}
                   </button>
                 );
               })}
@@ -1263,12 +1357,12 @@ export default function EventDetailPage() {
                     : 'border-transparent text-gray-500 hover:border-gray-200 hover:bg-gray-50'
                 }`}
               >
-                {t('events.strokesLabel')}
+                {classificationTotalLabel}
               </button>
               <button
                 type="button"
                 onClick={() => setSortMode((prev) => (prev?.type === 'score' ? null : { type: 'score' }))}
-                className={`w-10 text-center rounded-full border px-1 py-0.5 transition ${
+                className={`w-12 text-center rounded-full border px-1 py-0.5 transition ${
                   sortMode?.type === 'score'
                     ? 'border-amber-300 bg-amber-50 text-amber-800'
                     : 'border-transparent text-gray-500 hover:border-gray-200 hover:bg-gray-50'
@@ -1305,7 +1399,7 @@ export default function EventDetailPage() {
                     setExpandedUserId(next);
                     setExpandedRound(0);
                   }}
-                  className={`w-full text-left flex items-center justify-between gap-2 rounded-2xl border px-3 py-2 transition hover:-translate-y-0.5 hover:shadow-lg ${rowStyle}`}
+                  className={`min-w-[620px] w-full text-left flex items-center justify-between gap-2 rounded-2xl border px-3 py-2 transition hover:-translate-y-0.5 hover:shadow-lg ${rowStyle}`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="w-8 text-center text-sm font-semibold text-gray-900">
@@ -1321,20 +1415,23 @@ export default function EventDetailPage() {
                   </div>
                   <div className="flex items-center gap-1">
                     {row.rounds.map((value: any, idx: number) => (
-                      <div key={`r-${row.user_id}-${idx}`} className="w-8 text-center text-xs text-gray-700">
+                      <div key={`r-${row.user_id}-${idx}`} className="w-10 text-center text-xs text-gray-700">
                         {value == null ? '-' : value}
                       </div>
                     ))}
-                    <div className="w-10 text-center text-xs font-semibold text-gray-900">
+                    <div className="w-12 text-center text-xs font-semibold text-gray-900">
                       {row.total == null ? '-' : row.total}
                     </div>
-                    <div className="w-9 text-center text-xs font-semibold text-gray-900">
+                    <div className="w-12 text-center text-xs font-semibold text-gray-900">
                       {row.diffLabel || '-'}
                     </div>
                   </div>
                 </button>
                 {isExpanded && (
                   <div className="rounded-2xl border border-gray-200 bg-white/80 p-3">
+                    <div className="text-xs font-semibold text-gray-900 mb-2">
+                      Tarjeta: {row.name}
+                    </div>
                     <div className="flex items-center gap-2 mb-2">
                       {Array.from({ length: classificationRoundCount }, (_, idx) => (
                         <button
@@ -1347,12 +1444,12 @@ export default function EventDetailPage() {
                               : 'border-gray-200 bg-white text-gray-700'
                           }`}
                         >
-                          R{idx + 1}
+                          {getClassificationRoundLabel(idx)}
                         </button>
                       ))}
                     </div>
                     <div className="text-sm text-gray-700">
-                      {t('events.roundCardLabel').replace('{round}', String(expandedRound + 1))}{' '}
+                      {t('events.roundCardLabel').replace('{round}', getClassificationRoundLabel(expandedRound))}{' '}
                       <span className="font-semibold text-gray-900">
                         {row.rounds[expandedRound] == null
                           ? t('events.noData')
@@ -1416,9 +1513,11 @@ export default function EventDetailPage() {
                 {event.event_date ? new Date(event.event_date).toLocaleDateString() : t('events.noDate')}
               </div>
             </div>
-            <div className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
-              {event.status || t('events.pendingStatus')}
-            </div>
+            {String(event.status || '').trim().toLowerCase() !== 'inscripcion' && (
+              <div className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                {event.status || t('events.pendingStatus')}
+              </div>
+            )}
           </div>
           {!isMatchPlayEvent && classificationPhase === 'live' && (
             <div className="flex justify-end">
@@ -1434,61 +1533,6 @@ export default function EventDetailPage() {
         </div>
 
         {!isMatchPlayEvent && classificationPhase !== 'live' ? classificationSection : null}
-
-        {(!isEventStarted || isAttemptBased) && !isEventClosed && (
-          <div className="bg-white/90 rounded-3xl border-2 border-amber-300/90 p-4 sm:p-5 shadow-[0_24px_70px_rgba(217,119,6,0.22)] space-y-3">
-            <div className="text-sm font-semibold">{t('events.registrationTitle')}</div>
-            <div className="text-xs text-gray-500">
-              {event.registration_start
-                ? t('events.registrationFrom').replace('{date}', new Date(event.registration_start).toLocaleDateString())
-                : t('events.registrationDateUndefined')}
-              {event.registration_end
-                ? ` · ${t('events.registrationTo').replace('{date}', new Date(event.registration_end).toLocaleDateString())}`
-                : ''}
-            </div>
-            {message ? <div className="text-xs text-amber-700">{message}</div> : null}
-            {attemptMessage ? <div className="text-xs text-emerald-700">{attemptMessage}</div> : null}
-            <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="border border-gray-200 rounded-xl px-3 py-2 text-sm"
-              >
-                {(event.config?.prices || []).map((price: any) => (
-                  <option key={`${price.category}-${price.price}`} value={price.category || ''}>
-                    {price.category || t('events.categoryFallback')}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={handleRegister}
-                disabled={!registrationOpen || !user}
-                className="rounded-xl px-3 py-2 text-sm bg-blue-500 text-white shadow-sm shadow-blue-500/30 disabled:opacity-60"
-              >
-                {currentRegistration
-                  ? t('events.registered')
-                  : registrationOpen
-                    ? t('events.registerCta')
-                    : t('events.registrationClosed')}
-              </button>
-              {currentRegistration && (
-                <button
-                  type="button"
-                  onClick={handleRemove}
-                  className="rounded-xl px-3 py-2 text-sm bg-gray-100 text-gray-700"
-                >
-                  {t('common.cancel')}
-                </button>
-              )}
-            </div>
-            {isAttemptBased && currentRegistration && user && (
-              <div className="text-xs text-gray-600">
-                {t('events.attemptsLabel')}: {currentMaxAttempts != null ? `${currentAttemptsUsed}/${currentMaxAttempts}` : `${currentAttemptsUsed}`}
-              </div>
-            )}
-          </div>
-        )}
 
         {(startingConfig || flights.length > 0) && (
           <div className="bg-white/90 rounded-3xl border border-white/70 p-4 sm:p-5 shadow-[0_20px_60px_rgba(15,23,42,0.12)] space-y-3">
