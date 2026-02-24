@@ -208,6 +208,36 @@ body.premium-admin-bg {
   transform: translateY(0px);
 }
 
+@keyframes premiumNeonPulse {
+  0%,
+  100% {
+    transform: translateY(-3px) scale(1);
+    filter: saturate(1) brightness(1);
+  }
+  50% {
+    transform: translateY(-4px) scale(1.015);
+    filter: saturate(1.15) brightness(1.08);
+  }
+}
+
+.premium-admin-neon-pulse:hover {
+  animation: premiumNeonPulse 1.5s ease-in-out infinite;
+}
+
+.premium-admin-neon-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.16));
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.premium-admin-neon-pulse:hover::after {
+  opacity: 1;
+}
+
 .info-float-tile {
   background: transparent;
   border: none;

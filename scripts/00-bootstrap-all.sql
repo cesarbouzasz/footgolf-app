@@ -446,6 +446,89 @@ alter table public.teams add column if not exists name text;
 
 create index if not exists idx_teams_association_id on public.teams(association_id);
 
+-- 6b2) Pairs (parejas) por asociación
+create table if not exists public.pairs (
+  id uuid primary key default gen_random_uuid(),
+  association_id uuid not null references public.associations(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  unique (association_id, name)
+);
+
+create index if not exists idx_pairs_association_id on public.pairs(association_id);
+
+create table if not exists public.pair_members (
+  id uuid primary key default gen_random_uuid(),
+  association_id uuid not null references public.associations(id) on delete cascade,
+  pair_id uuid not null references public.pairs(id) on delete cascade,
+  player_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default timezone('utc', now()),
+  unique (pair_id, player_id)
+);
+
+create index if not exists idx_pair_members_pair_id on public.pair_members(pair_id);
+create index if not exists idx_pair_members_player_id on public.pair_members(player_id);
+
+alter table public.pairs enable row level security;
+alter table public.pair_members enable row level security;
+
+do $$ begin
+  create policy "pairs_read_all" on public.pairs
+    for select
+    using (true);
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create policy "pairs_write_staff" on public.pairs
+    for all
+    to authenticated
+    using (
+      exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()::uuid
+          and (p.role in ('admin','creador') or coalesce(p.is_admin,false) = true)
+      )
+    )
+    with check (
+      exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()::uuid
+          and (p.role in ('admin','creador') or coalesce(p.is_admin,false) = true)
+      )
+    );
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create policy "pair_members_read_all" on public.pair_members
+    for select
+    using (true);
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create policy "pair_members_write_staff" on public.pair_members
+    for all
+    to authenticated
+    using (
+      exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()::uuid
+          and (p.role in ('admin','creador') or coalesce(p.is_admin,false) = true)
+      )
+    )
+    with check (
+      exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()::uuid
+          and (p.role in ('admin','creador') or coalesce(p.is_admin,false) = true)
+      )
+    );
+exception when duplicate_object then null;
+end $$;
+
 -- 6c) Información: enlaces y noticias
 create table if not exists public.info_links (
   id uuid primary key default gen_random_uuid(),
@@ -713,6 +796,116 @@ end $$;
 do $$ begin
   create policy "event_team_members_write_staff" on public.event_team_members
     for all
+    to authenticated
+    using (
+      exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()::uuid
+          and (p.role in ('admin','creador') or coalesce(p.is_admin,false) = true)
+      )
+    )
+    with check (
+      exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()::uuid
+          and (p.role in ('admin','creador') or coalesce(p.is_admin,false) = true)
+      )
+    );
+exception when duplicate_object then null;
+end $$;
+
+-- 7c) Competiciones por modalidad (individual/parejas/equipos)
+create table if not exists public.event_competitions (
+  id uuid primary key default gen_random_uuid(),
+  association_id uuid not null references public.associations(id) on delete cascade,
+  event_id uuid not null references public.events(id) on delete cascade,
+  name text not null,
+  competition_type text not null check (competition_type in ('individual','parejas','equipos')),
+  status text null,
+  status_mode text not null default 'auto',
+  registration_start date null,
+  registration_end date null,
+  course_id uuid null references public.courses(id) on delete set null,
+  max_players integer null,
+  config jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_event_competitions_event_id on public.event_competitions(event_id);
+create index if not exists idx_event_competitions_association_id on public.event_competitions(association_id);
+create index if not exists idx_event_competitions_type on public.event_competitions(competition_type);
+
+alter table public.event_competitions enable row level security;
+
+do $$ begin
+  create policy "event_competitions_read_all" on public.event_competitions
+    for select
+    using (true);
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create policy "event_competitions_write_staff" on public.event_competitions
+    for all
+    to authenticated
+    using (
+      exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()::uuid
+          and (p.role in ('admin','creador') or coalesce(p.is_admin,false) = true)
+      )
+    )
+    with check (
+      exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()::uuid
+          and (p.role in ('admin','creador') or coalesce(p.is_admin,false) = true)
+      )
+    );
+exception when duplicate_object then null;
+end $$;
+
+-- 7d) Tarjetas por competicion/evento
+create table if not exists public.event_cards (
+  id uuid primary key default gen_random_uuid(),
+  association_id uuid not null references public.associations(id) on delete cascade,
+  event_id uuid not null references public.events(id) on delete cascade,
+  competition_id uuid null references public.event_competitions(id) on delete set null,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  hole_scores integer[] not null,
+  total_score integer null,
+  holes_played integer null,
+  status text not null default 'valid',
+  invalidated_at timestamptz null,
+  created_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_event_cards_event_id on public.event_cards(event_id);
+create index if not exists idx_event_cards_competition_id on public.event_cards(competition_id);
+create index if not exists idx_event_cards_user_id on public.event_cards(user_id);
+create index if not exists idx_event_cards_status on public.event_cards(status);
+
+alter table public.event_cards enable row level security;
+
+do $$ begin
+  create policy "event_cards_read_all" on public.event_cards
+    for select
+    using (true);
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create policy "event_cards_insert_self" on public.event_cards
+    for insert
+    to authenticated
+    with check (auth.uid()::uuid = user_id);
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create policy "event_cards_write_staff" on public.event_cards
+    for update
     to authenticated
     using (
       exists (

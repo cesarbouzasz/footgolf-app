@@ -19,6 +19,16 @@ type Association = {
   name: string;
 };
 
+function clampDistance(value: number) {
+  if (!Number.isFinite(value)) return 100;
+  return Math.max(1, Math.min(999, Math.floor(value)));
+}
+
+function clampPar(value: number) {
+  if (!Number.isFinite(value)) return 4;
+  return Math.max(1, Math.min(99, Math.floor(value)));
+}
+
 async function validateImage500(file: File, t: (path: string) => string) {
   if (!file.type.startsWith('image/')) {
     return { ok: false as const, error: t('adminCoursesForm.errors.imageType') };
@@ -62,7 +72,6 @@ function AdminCrearCampoPageInner() {
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const previewUrlRef = useRef<string | null>(null);
 
-  const [holesCount, setHolesCount] = useState<number>(18);
   const [holes, setHoles] = useState<HoleRow[]>(() =>
     Array.from({ length: 18 }).map(() => ({ par: 4, distance: 100, early_tee: false }))
   );
@@ -158,20 +167,19 @@ function AdminCrearCampoPageInner() {
 
       const holesPayload: HoleRow[] = parsedHoles
         ? parsedHoles.map((h: any) => ({
-            par: Number(h?.par || 4),
-            distance: Number(h?.distance || 100),
+            par: clampPar(Number(h?.par || 4)),
+            distance: clampDistance(Number(h?.distance || 100)),
             early_tee: Boolean(h?.early_tee),
           }))
         : pars.map((par: number, idx: number) => ({
-            par: Number(par || 4),
-            distance: Number(distances[idx] || 100),
+            par: clampPar(Number(par || 4)),
+            distance: clampDistance(Number(distances[idx] || 100)),
             early_tee: false,
           }));
 
       setName(String(course?.name || ''));
       setLocation(String(course?.location || ''));
       setLocalRules(String(course?.local_rules || ''));
-      setHolesCount(holesPayload.length || 18);
       setHoles(holesPayload.length ? holesPayload : Array.from({ length: 18 }).map(() => ({ par: 4, distance: 100, early_tee: false })));
       setScopeAssociationId(assoc || null);
       setScopeTouched(true);
@@ -208,26 +216,22 @@ function AdminCrearCampoPageInner() {
     };
   }, [editId]);
 
-  useEffect(() => {
-    const next = Math.max(1, Math.min(36, Math.floor(holesCount || 1)));
-    if (holes.length === next) return;
-    setHoles((prev) => {
-      const base = [...prev];
-      if (base.length < next) {
-        while (base.length < next) base.push({ par: 4, distance: 100, early_tee: false });
-      } else {
-        base.length = next;
-      }
-      return base;
-    });
-  }, [holesCount, holes.length]);
-
   const canSave = useMemo(() => {
     if (!isCreator && !scopeAssociationId) return false;
     if (!name.trim()) return false;
     if (imageError) return false;
     return true;
   }, [isCreator, scopeAssociationId, name, imageError]);
+
+  const holesParTotal = useMemo(
+    () => holes.reduce((sum, hole) => sum + clampPar(Number(hole.par || 0)), 0),
+    [holes],
+  );
+
+  const holesDistanceTotal = useMemo(
+    () => holes.reduce((sum, hole) => sum + clampDistance(Number(hole.distance || 0)), 0),
+    [holes],
+  );
 
   const onPickImage = async (file: File | null) => {
     setOkMsg(null);
@@ -278,8 +282,8 @@ function AdminCrearCampoPageInner() {
     setOkMsg(null);
 
     const holesPayload = holes.map((h) => ({
-      par: Math.floor(Number(h.par || 0)),
-      distance: Math.floor(Number(h.distance || 0)),
+      par: clampPar(Number(h.par || 0)),
+      distance: clampDistance(Number(h.distance || 0)),
       early_tee: Boolean(h.early_tee),
     }));
 
@@ -322,7 +326,6 @@ function AdminCrearCampoPageInner() {
         URL.revokeObjectURL(previewUrlRef.current);
         previewUrlRef.current = null;
       }
-      setHolesCount(18);
       setHoles(Array.from({ length: 18 }).map(() => ({ par: 4, distance: 100, early_tee: false })));
       nameRef.current?.focus();
     }
@@ -493,29 +496,88 @@ function AdminCrearCampoPageInner() {
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-between">
+            <div className="mt-6 flex items-center justify-between gap-3">
               <div className="text-sm font-extrabold text-gray-900">{t('adminCoursesForm.holesTitle')}</div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-gray-700">{t('adminCoursesForm.holesCountLabel')}</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={36}
-                  value={String(holesCount)}
-                  onChange={(e) => setHolesCount(Number(e.target.value || 18))}
-                  className="w-[90px] border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white/80"
-                />
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-700">{t('adminCoursesForm.parTotalLabel')}</span>
+                  <input
+                    value={String(holesParTotal)}
+                    readOnly
+                    className="w-[90px] border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-700"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-700">{t('adminCoursesForm.distanceTotalLabel')}</span>
+                  <input
+                    value={String(holesDistanceTotal)}
+                    readOnly
+                    className="w-[110px] border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-700"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="mt-3 overflow-x-auto">
+            <div className="mt-2 text-[11px] text-gray-600">
+              {t('adminCoursesForm.earlyTeeHint')}
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:hidden">
+              {holes.map((h, idx) => (
+                <div
+                  key={`mobile-hole-${idx}`}
+                  className={
+                    h.early_tee
+                      ? 'rounded-xl border border-rose-200 bg-rose-50 p-2'
+                      : 'rounded-xl border border-gray-200 bg-white/70 p-2'
+                  }
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="text-xs font-extrabold text-gray-900">{t('adminCoursesForm.holeHeader')} {idx + 1}</div>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(h.early_tee)}
+                      onChange={(e) => updateHole(idx, { early_tee: e.target.checked })}
+                      className="h-4 w-4 rounded border-gray-300"
+                      aria-label={t('adminCoursesForm.earlyTeeLabel').replace('{hole}', String(idx + 1))}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{t('adminCoursesForm.parHeader')}</div>
+                      <input
+                        type="number"
+                        min={1}
+                        max={99}
+                        value={String(h.par)}
+                        onChange={(e) => updateHole(idx, { par: clampPar(Number(e.target.value || 0)) })}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1 text-sm bg-white/90"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{t('adminCoursesForm.distanceHeader')}</div>
+                      <input
+                        type="number"
+                        min={1}
+                        max={999}
+                        value={String(h.distance)}
+                        onChange={(e) => updateHole(idx, { distance: clampDistance(Number(e.target.value || 0)) })}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1 text-sm bg-white/90"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-3 hidden overflow-x-auto sm:block">
               <table className="w-full table-fixed text-sm">
                 <thead>
                   <tr className="text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-200 bg-white/70">
                     <th className="text-left font-semibold px-2 py-1.5 w-[55px]">{t('adminCoursesForm.holeHeader')}</th>
                     <th className="text-left font-semibold px-2 py-1.5 w-[36px]"></th>
                     <th className="text-left font-semibold px-2 py-1.5 w-[70px]">{t('adminCoursesForm.parHeader')}</th>
-                    <th className="text-left font-semibold px-3 py-2">{t('adminCoursesForm.distanceHeader')}</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[110px]">{t('adminCoursesForm.distanceHeader')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -542,9 +604,9 @@ function AdminCrearCampoPageInner() {
                         <input
                           type="number"
                           min={1}
-                          max={10}
+                          max={99}
                           value={String(h.par)}
-                          onChange={(e) => updateHole(idx, { par: Number(e.target.value || 0) })}
+                          onChange={(e) => updateHole(idx, { par: clampPar(Number(e.target.value || 0)) })}
                           className="w-full min-w-0 border border-gray-200 rounded-xl px-2 py-1 text-sm bg-white/80"
                         />
                       </td>
@@ -552,19 +614,16 @@ function AdminCrearCampoPageInner() {
                         <input
                           type="number"
                           min={1}
-                          max={2500}
+                          max={999}
                           value={String(h.distance)}
-                          onChange={(e) => updateHole(idx, { distance: Number(e.target.value || 0) })}
-                          className="w-full min-w-0 border border-gray-200 rounded-xl px-3 py-1.5 text-sm bg-white/80"
+                          onChange={(e) => updateHole(idx, { distance: clampDistance(Number(e.target.value || 0)) })}
+                          className="w-[88px] border border-gray-200 rounded-xl px-2 py-1 text-sm bg-white/80"
                         />
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-            <div className="mt-2 text-[11px] text-gray-600">
-              {t('adminCoursesForm.earlyTeeHint')}
             </div>
 
             {(errorMsg || okMsg) && (

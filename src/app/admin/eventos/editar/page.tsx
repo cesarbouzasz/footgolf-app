@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, DoorOpen, Pencil, Save, RefreshCw, ChevronUp, ChevronDown, PlusCircle } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { useAuth } from '@/context/auth-context';
@@ -13,12 +14,13 @@ import { compareCardsForTieBreak } from '@/lib/rankings';
 import * as XLSX from 'xlsx';
 import { useLanguage } from '@/context/language-context';
 
-type EventLite = { id: string; name: string; event_date: string | null };
+type EventLite = { id: string; name: string; event_date: string | null; config?: any | null };
 type CourseLite = { id: string; name: string };
 
 type MatchPlayFormat = 'classic' | 'groups';
 type GroupMode = 'single' | 'multi';
 type StablefordMode = 'classic' | 'best_card' | 'best_hole' | 'weekly';
+type PairPlayMode = 'copa_canada' | 'fourball' | 'foursomes';
 type PointsMode = 'manual' | 'percent';
 type StartMode = 'tiro' | 'hoyo_intervalo' | 'libre';
 type ChampHubEventDraft = {
@@ -32,6 +34,16 @@ type ChampHubEventDraft = {
 };
 
 const CATEGORY_OPTIONS = ['Masculino', 'Femenino', 'Senior', 'Senior+', 'Junior'];
+const PAIR_PLAY_MODE_OPTIONS: Array<{ value: PairPlayMode; label: string }> = [
+  { value: 'copa_canada', label: 'adminEventsCreate.pairModeCanada' },
+  { value: 'fourball', label: 'adminEventsCreate.pairModeFourball' },
+  { value: 'foursomes', label: 'adminEventsCreate.pairModeFoursomes' },
+];
+
+function isChampionshipEventRow(eventLike: any) {
+  const config = eventLike?.config || {};
+  return !!config?.isChampionship || !!config?.championshipHub?.enabled;
+}
 
 type RegisteredPlayer = { id: string; name: string; category?: string | null };
 type FlightDraft = {
@@ -440,8 +452,13 @@ function reorder<T>(arr: T[], fromIndex: number, toIndex: number): T[] {
 }
 
 export default function AdminEditarEventoPage() {
+  const searchParams = useSearchParams();
   const { user, profile, loading, isAdmin, currentAssociationId } = useAuth();
   const { t } = useLanguage();
+
+  const scope = String(searchParams.get('scope') || '').trim().toLowerCase();
+  const eventFromQuery = String(searchParams.get('event') || '').trim();
+  const onlyChampionshipScope = scope === 'championship';
 
   const bracketLabels = useMemo<BracketLabels>(() => ({
     placeholder: t('common.notAvailable'),
@@ -496,10 +513,11 @@ export default function AdminEditarEventoPage() {
   const [groupManualRaw, setGroupManualRaw] = useState('');
 
   const [stablefordMode, setStablefordMode] = useState<StablefordMode>('classic');
+  const [pairsPlayMode, setPairsPlayMode] = useState<PairPlayMode>('copa_canada');
   const [classicRoundsRaw, setClassicRoundsRaw] = useState('1');
-  const [bestCardRoundsRaw, setBestCardRoundsRaw] = useState('2');
+  const [bestCardRoundsRaw, setBestCardRoundsRaw] = useState('1');
   const [bestCardMaxAttemptsRaw, setBestCardMaxAttemptsRaw] = useState('');
-  const [bestHoleRoundsRaw, setBestHoleRoundsRaw] = useState('2');
+  const [bestHoleRoundsRaw, setBestHoleRoundsRaw] = useState('1');
   const [weeklyAllowExtraAttempts, setWeeklyAllowExtraAttempts] = useState(false);
   const [weeklyMaxAttemptsRaw, setWeeklyMaxAttemptsRaw] = useState('');
   const [courseParRaw, setCourseParRaw] = useState('');
@@ -562,6 +580,10 @@ export default function AdminEditarEventoPage() {
     return !!s && s.includes('stable');
   }, [competitionMode]);
 
+  const isPrimaryPairsCompetition = useMemo(() => {
+    return String((eventConfig as any)?.primaryCompetitionType || '').trim().toLowerCase() === 'parejas';
+  }, [eventConfig]);
+
   const isEventClosed = useMemo(() => {
     const s = String(status || '').trim().toLowerCase();
     return ['closed', 'finished', 'finalizado', 'cerrado'].includes(s);
@@ -593,22 +615,34 @@ export default function AdminEditarEventoPage() {
           return;
         }
 
-        const sessionRes = await supabase.auth.getSession();
-        const token = sessionRes?.data?.session?.access_token;
-        const headers: Record<string, string> = {};
-        if (token) headers.Authorization = `Bearer ${token}`;
+        const { data, error } = await supabase
+          .from('events')
+          .select('id, name, event_date, config')
+          .eq('association_id', assoc)
+          .order('event_date', { ascending: false });
+        const list = error ? [] : ((data as any[]) || []);
 
-        const res = await fetch(`/api/admin/events/list?association_id=${encodeURIComponent(assoc)}`, { headers });
-        const json = await res.json().catch(() => null);
-        const list = Array.isArray(json?.events) ? (json.events as any[]) : [];
-        const mapped: EventLite[] = list.map((r) => ({
+        let mapped: EventLite[] = list.map((r) => ({
           id: String(r.id),
           name: String(r.name || ''),
           event_date: r.event_date ? String(r.event_date) : null,
+          config: r.config || null,
         }));
+
+        if (onlyChampionshipScope) {
+          mapped = mapped.filter((row) => isChampionshipEventRow(row));
+        }
+
         if (active) {
           setEvents(mapped);
-          if (mapped.length === 0) setSelectedEventId('');
+          setSelectedEventId((prev) => {
+            const queryCandidate = eventFromQuery && mapped.some((ev) => ev.id === eventFromQuery)
+              ? eventFromQuery
+              : '';
+            if (queryCandidate) return queryCandidate;
+            if (prev && mapped.some((ev) => ev.id === prev)) return prev;
+            return '';
+          });
         }
       } catch (e) {
         if (active) setEvents([]);
@@ -620,7 +654,7 @@ export default function AdminEditarEventoPage() {
     return () => {
       active = false;
     };
-  }, [currentAssociationId]);
+  }, [currentAssociationId, eventFromQuery, onlyChampionshipScope]);
 
   useEffect(() => {
     let active = true;
@@ -680,6 +714,7 @@ export default function AdminEditarEventoPage() {
     setGroupHasConsolation(false);
     setGroupManualRaw('');
     setStablefordMode('classic');
+    setPairsPlayMode('copa_canada');
     setClassicRoundsRaw('1');
     setBestCardRoundsRaw('2');
     setBestCardMaxAttemptsRaw('');
@@ -795,6 +830,7 @@ export default function AdminEditarEventoPage() {
         setGroupHasConsolation(!!config?.groupHasConsolation);
         setGroupManualRaw(typeof config?.groupManual === 'string' ? config.groupManual : '');
         setStablefordMode((config?.stableford?.mode as StablefordMode) || 'classic');
+        setPairsPlayMode((config?.stableford?.pairsMode as PairPlayMode) || 'copa_canada');
         setClassicRoundsRaw(config?.stableford?.classicRounds != null ? String(config.stableford.classicRounds) : '1');
         setBestCardRoundsRaw(config?.stableford?.bestCardRounds != null ? String(config.stableford.bestCardRounds) : '2');
         setBestCardMaxAttemptsRaw(config?.stableford?.bestCardMaxAttempts != null ? String(config.stableford.bestCardMaxAttempts) : '');
@@ -911,11 +947,11 @@ export default function AdminEditarEventoPage() {
     if (!selectedEventId.trim()) return false;
     if (!name.trim()) return false;
     if (eventDate && !isIsoDate(eventDate)) return false;
-    if (!courseId.trim()) return false;
+    if (!onlyChampionshipScope && !courseId.trim()) return false;
     if (eventEndDate && !isIsoDate(eventEndDate)) return false;
     if (eventEndDate && eventDate && eventEndDate < eventDate) return false;
-    if (registrationStart && !isIsoDate(registrationStart)) return false;
-    if (registrationEnd && !isIsoDate(registrationEnd)) return false;
+    if (!onlyChampionshipScope && registrationStart && !isIsoDate(registrationStart)) return false;
+    if (!onlyChampionshipScope && registrationEnd && !isIsoDate(registrationEnd)) return false;
 
     if (maxPlayersRaw.trim()) {
       const n = Number.parseInt(maxPlayersRaw, 10);
@@ -960,7 +996,7 @@ export default function AdminEditarEventoPage() {
         }
       } else if (stablefordMode === 'best_hole') {
         const rounds = Number.parseInt(bestHoleRoundsRaw, 10);
-        if (!Number.isFinite(rounds) || rounds < 2) return false;
+        if (!Number.isFinite(rounds) || rounds < 1) return false;
       } else {
         if (weeklyAllowExtraAttempts && weeklyMaxAttemptsRaw.trim()) {
           const maxAttempts = Number.parseInt(weeklyMaxAttemptsRaw, 10);
@@ -1048,7 +1084,7 @@ export default function AdminEditarEventoPage() {
     }
 
     return true;
-  }, [selectedEventId, name, eventDate, eventEndDate, registrationStart, registrationEnd, courseId, maxPlayersRaw, teamCompetitionEnabled, teamBestPlayersRaw, startMode, startHoleRaw, startTimeRaw, startIntervalRaw, isMatchPlay, isStableford, matchPlayFormat, holesPerRoundRaw, hasConsolation, consolationHolesPerRoundRaw, hasSeeds, seedCountRaw, groupMode, groupHolesRaw, groupMatchesPerDayRaw, groupDatesRaw, groupCountRaw, groupAdvanceRaw, stablefordMode, classicRoundsRaw, bestCardRoundsRaw, bestCardMaxAttemptsRaw, bestHoleRoundsRaw, weeklyAllowExtraAttempts, weeklyMaxAttemptsRaw, courseParRaw, pointsMode, pointsFirstRaw, pointsDecayRaw, pointsPodiumRaw, pointsTableRaw, champEnabled, champTotalRaw, champSimpleRaw, champDoubleRaw, champBestSimpleRaw, champBestDoubleRaw, champCategories, champHubEnabled, champHubCategories, champHubEvents]);
+  }, [selectedEventId, name, eventDate, eventEndDate, registrationStart, registrationEnd, courseId, maxPlayersRaw, teamCompetitionEnabled, teamBestPlayersRaw, startMode, startHoleRaw, startTimeRaw, startIntervalRaw, isMatchPlay, isStableford, matchPlayFormat, holesPerRoundRaw, hasConsolation, consolationHolesPerRoundRaw, hasSeeds, seedCountRaw, groupMode, groupHolesRaw, groupMatchesPerDayRaw, groupDatesRaw, groupCountRaw, groupAdvanceRaw, stablefordMode, classicRoundsRaw, bestCardRoundsRaw, bestCardMaxAttemptsRaw, bestHoleRoundsRaw, weeklyAllowExtraAttempts, weeklyMaxAttemptsRaw, courseParRaw, pointsMode, pointsFirstRaw, pointsDecayRaw, pointsPodiumRaw, pointsTableRaw, champEnabled, champTotalRaw, champSimpleRaw, champDoubleRaw, champBestSimpleRaw, champBestDoubleRaw, champCategories, champHubEnabled, champHubCategories, champHubEvents, onlyChampionshipScope]);
 
   const onSave = async () => {
     setOkMsg(null);
@@ -1062,7 +1098,7 @@ export default function AdminEditarEventoPage() {
       setErrorMsg(t('adminEventsEdit.errors.nameRequired'));
       return;
     }
-    if (!courseId.trim()) {
+    if (!onlyChampionshipScope && !courseId.trim()) {
       setErrorMsg(t('adminEventsEdit.errors.courseRequired'));
       return;
     }
@@ -1141,6 +1177,7 @@ export default function AdminEditarEventoPage() {
 
       config.stableford = {
         mode: stablefordMode,
+        pairsMode: pairsPlayMode,
         classicRounds: Number.isFinite(classicRounds) ? classicRounds : null,
         bestCardRounds: Number.isFinite(bestCardRounds) ? bestCardRounds : null,
         bestCardMaxAttempts: bestCardMaxAttemptsRaw.trim()
@@ -1248,9 +1285,10 @@ export default function AdminEditarEventoPage() {
         const total = rounds.some((v) => v != null)
           ? rounds.reduce((sum, v) => sum + (v || 0), 0)
           : (r.strokes == null || r.strokes === ('' as any) ? null : Number(r.strokes));
+        const manualPosition = Number(r.position);
         return {
           user_id: r.user_id,
-          position: idx + 1,
+          position: Number.isFinite(manualPosition) && manualPosition > 0 ? manualPosition : idx + 1,
           rounds,
           strokes: total == null || Number.isNaN(total) ? null : total,
           note: typeof r.note === 'string' ? r.note : null,
@@ -1278,12 +1316,12 @@ export default function AdminEditarEventoPage() {
         body: JSON.stringify({
           name: trimmedName,
           event_date: eventDate || null,
-          registration_start: registrationStart || null,
-          registration_end: registrationEnd || null,
+          registration_start: onlyChampionshipScope ? null : (registrationStart || null),
+          registration_end: onlyChampionshipScope ? null : (registrationEnd || null),
           competition_mode: competitionMode.trim() || null,
           status: status.trim() || null,
           description: description.trim() || null,
-          course_id: courseId.trim() || null,
+          course_id: onlyChampionshipScope ? null : (courseId.trim() || null),
           has_handicap_ranking: false,
           config: mergedConfig,
         }),
@@ -2215,14 +2253,14 @@ export default function AdminEditarEventoPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.tournamentLabel')}</div>
+                <div className="text-xs font-semibold text-gray-700">{onlyChampionshipScope ? t('adminEventsMenu.manageChampionship') : t('adminEventsEdit.tournamentLabel')}</div>
                 <select
                   value={selectedEventId}
                   onChange={(e) => setSelectedEventId(e.target.value)}
                   className={selectClassName}
                   disabled={loadingEvents || !currentAssociationId}
                 >
-                  <option value="">{loadingEvents ? t('adminEventsEdit.loadingEvents') : t('adminEventsEdit.selectTournament')}</option>
+                  <option value="">{loadingEvents ? t('adminEventsEdit.loadingEvents') : (onlyChampionshipScope ? t('adminEventsMenu.manageChampionship') : t('adminEventsEdit.selectTournament'))}</option>
                   {events.map((ev) => (
                     <option key={ev.id} value={ev.id}>
                       {ev.event_date ? `${ev.event_date} — ${ev.name}` : ev.name}
@@ -2303,27 +2341,31 @@ export default function AdminEditarEventoPage() {
                     />
                   </div>
 
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.registrationStartLabel')}</div>
-                    <input
-                      type="date"
-                      value={registrationStart}
-                      onChange={(e) => setRegistrationStart(e.target.value)}
-                      className={inputClassName}
-                      disabled={saving || loadingEvent}
-                    />
-                  </div>
+                  {!onlyChampionshipScope && (
+                    <>
+                      <div className="space-y-1">
+                        <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.registrationStartLabel')}</div>
+                        <input
+                          type="date"
+                          value={registrationStart}
+                          onChange={(e) => setRegistrationStart(e.target.value)}
+                          className={inputClassName}
+                          disabled={saving || loadingEvent}
+                        />
+                      </div>
 
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.registrationEndLabel')}</div>
-                    <input
-                      type="date"
-                      value={registrationEnd}
-                      onChange={(e) => setRegistrationEnd(e.target.value)}
-                      className={inputClassName}
-                      disabled={saving || loadingEvent}
-                    />
-                  </div>
+                      <div className="space-y-1">
+                        <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.registrationEndLabel')}</div>
+                        <input
+                          type="date"
+                          value={registrationEnd}
+                          onChange={(e) => setRegistrationEnd(e.target.value)}
+                          className={inputClassName}
+                          disabled={saving || loadingEvent}
+                        />
+                      </div>
+                    </>
+                  )}
 
                   <div className="space-y-1">
                     <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.statusLabel')}</div>
@@ -2430,24 +2472,26 @@ export default function AdminEditarEventoPage() {
                     <div className="text-[11px] text-gray-500">{t('adminEventsEdit.startModeHint')}</div>
                   </div>
 
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold text-gray-700">
-                      {t('adminEventsEdit.courseLabel')} <span className="text-red-500">**</span>
+                  {!onlyChampionshipScope && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-gray-700">
+                        {t('adminEventsEdit.courseLabel')} <span className="text-red-500">**</span>
+                      </div>
+                      <select
+                        value={courseId}
+                        onChange={(e) => setCourseId(e.target.value)}
+                        className={selectClassName}
+                        disabled={saving || loadingEvent || loadingCourses}
+                      >
+                        <option value="">{t('adminEventsEdit.courseNone')}</option>
+                        {courses.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                    <select
-                      value={courseId}
-                      onChange={(e) => setCourseId(e.target.value)}
-                      className={selectClassName}
-                      disabled={saving || loadingEvent || loadingCourses}
-                    >
-                      <option value="">{t('adminEventsEdit.courseNone')}</option>
-                      {courses.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  )}
 
                   <div className="space-y-1">
                     <div className="text-xs font-semibold text-gray-700">{t('adminEventsEdit.maxPlayersLabel')}</div>
@@ -2620,9 +2664,27 @@ export default function AdminEditarEventoPage() {
                           <option value="classic">{t('adminEventsCreate.stablefordClassicLabel')}</option>
                           <option value="best_card">{t('adminEventsCreate.stablefordBestCardLabel')}</option>
                           <option value="best_hole">{t('adminEventsCreate.stablefordBestHoleLabel')}</option>
-                          <option value="weekly">{t('adminEventsCreate.stablefordWeeklyLabel')}</option>
                         </select>
                       </div>
+
+                      {isPrimaryPairsCompetition && (
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-gray-700">{t('adminEventsCreate.pairModeLabel')}</div>
+                          <select
+                            value={pairsPlayMode}
+                            onChange={(e) => setPairsPlayMode(e.target.value as PairPlayMode)}
+                            disabled={saving || loadingEvent}
+                            className={selectClassName}
+                          >
+                            {PAIR_PLAY_MODE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {t(option.label)}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="text-[11px] text-gray-500">{t('adminEventsCreate.pairModeHint')}</div>
+                        </div>
+                      )}
 
                       {stablefordMode === 'classic' && (
                         <>
@@ -2687,38 +2749,6 @@ export default function AdminEditarEventoPage() {
                         </div>
                       )}
 
-                      {stablefordMode === 'weekly' && (
-                        <div className="space-y-2 sm:col-span-2">
-                          <div className="text-xs font-semibold text-gray-700">{t('adminEventsCreate.weeklyAttemptsTitle')}</div>
-                          <label className="flex items-center gap-2 text-sm text-gray-700">
-                            <input
-                              type="checkbox"
-                              checked={weeklyAllowExtraAttempts}
-                              onChange={(e) => setWeeklyAllowExtraAttempts(e.target.checked)}
-                              disabled={saving || loadingEvent}
-                            />
-                            {t('adminEventsCreate.weeklyAllowExtraLabel')}
-                          </label>
-                          {weeklyAllowExtraAttempts && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <div className="text-xs font-semibold text-gray-700">{t('adminEventsCreate.weeklyMaxAttemptsLabel')}</div>
-                                <input
-                                  value={weeklyMaxAttemptsRaw}
-                                  onChange={(e) => setWeeklyMaxAttemptsRaw(e.target.value)}
-                                  className={inputClassName}
-                                  placeholder={t('adminEventsCreate.weeklyMaxAttemptsPlaceholder')}
-                                  disabled={saving || loadingEvent}
-                                />
-                              </div>
-                              <div className="text-[11px] text-gray-600 flex items-center">
-                                {t('adminEventsCreate.weeklyApprovalHint')}
-                              </div>
-                            </div>
-                          )}
-                          <div className="text-[11px] text-gray-600">{t('adminEventsCreate.weeklyMinHint')}</div>
-                        </div>
-                      )}
                     </div>
 
                     {stablefordMode === 'classic' && (
@@ -3425,9 +3455,6 @@ export default function AdminEditarEventoPage() {
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <div className="text-sm font-extrabold text-gray-900">{t('adminEventsEdit.finalClassificationTitle')}</div>
-                      <div className="text-[11px] text-gray-600">
-                        {t('adminEventsEdit.finalClassificationHint')}
-                      </div>
                       {finalClassificationLocked && (
                         <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-2 py-1 inline-block mt-2">
                           {t('adminEventsEdit.classificationLocked')}

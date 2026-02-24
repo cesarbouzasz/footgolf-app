@@ -64,6 +64,8 @@ export default function AdminEquiposPage() {
 
   const [playerOrder, setPlayerOrder] = useState<PlayerOrder>('last_name');
   const [playerQuery, setPlayerQuery] = useState('');
+  const [playerCategory, setPlayerCategory] = useState('');
+  const [playerProvince, setPlayerProvince] = useState('');
   const [assignBusy, setAssignBusy] = useState(false);
   const [eventPlayerIds, setEventPlayerIds] = useState<string[] | null>(null);
 
@@ -303,20 +305,34 @@ export default function AdminEquiposPage() {
       .sort((a, b) => displayName(a as any).localeCompare(displayName(b as any), 'es'));
   }, [items, selectedTeamName]);
 
+  const playerCategoryOptions = useMemo(() => {
+    const base = ['Masculino', 'Femenino', 'Senior', 'Senior+', 'Junior'];
+    const fromData = Array.from(new Set(items.map((p) => String(p.category || '').trim()).filter(Boolean)));
+    const extras = fromData
+      .filter((value) => !base.some((fixed) => fixed.toLowerCase() === value.toLowerCase()))
+      .sort((a, b) => a.localeCompare(b, 'es'));
+    return [...base, ...extras];
+  }, [items]);
+
+  const playerProvinceOptions = useMemo(() => {
+    return Array.from(new Set(items.map((p) => String(p.province || '').trim()).filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b, 'es')
+    );
+  }, [items]);
+
   const filteredPlayers = useMemo(() => {
     const q = playerQuery.trim().toLowerCase();
     const base = items.filter((p) => {
       if (Array.isArray(eventPlayerIds)) {
         if (!eventPlayerIds.includes(p.id)) return false;
       }
-      if (!q) return true;
       const name = displayName(p).toLowerCase();
       const fn = String(p.first_name || '').toLowerCase();
       const ln = String(p.last_name || '').toLowerCase();
       const cat = String(p.category || '').toLowerCase();
       const prov = String(p.province || '').toLowerCase();
       const idShort = shortId(p.id).toLowerCase();
-      return (
+      const matchesQuery = !q || (
         name.includes(q) ||
         fn.includes(q) ||
         ln.includes(q) ||
@@ -324,6 +340,9 @@ export default function AdminEquiposPage() {
         prov.includes(q) ||
         idShort.includes(q)
       );
+      const matchesCategory = !playerCategory || cat === playerCategory.toLowerCase();
+      const matchesProvince = !playerProvince || prov === playerProvince.toLowerCase();
+      return matchesQuery && matchesCategory && matchesProvince;
     });
 
     const sorted = [...base];
@@ -355,7 +374,7 @@ export default function AdminEquiposPage() {
     }
 
     return sorted;
-  }, [items, playerQuery, playerOrder, eventPlayerIds]);
+  }, [items, playerQuery, playerOrder, eventPlayerIds, playerCategory, playerProvince]);
 
   const filteredTeams = useMemo(() => {
     const q = teamQuery.trim().toLowerCase();
@@ -823,6 +842,26 @@ export default function AdminEquiposPage() {
                     placeholder={t('adminTeams.searchPlayersPlaceholder')}
                     className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white/80"
                   />
+                  <select
+                    value={playerCategory}
+                    onChange={(e) => setPlayerCategory(e.target.value)}
+                    className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white/80"
+                  >
+                    <option value="">{t('adminTeams.allCategories')}</option>
+                    {playerCategoryOptions.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={playerProvince}
+                    onChange={(e) => setPlayerProvince(e.target.value)}
+                    className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white/80"
+                  >
+                    <option value="">{t('adminTeams.allProvinces')}</option>
+                    {playerProvinceOptions.map((prov) => (
+                      <option key={prov} value={prov}>{prov}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="mt-3 text-xs text-gray-700">
@@ -836,7 +875,6 @@ export default function AdminEquiposPage() {
                     <table className="min-w-full text-sm">
                       <thead>
                         <tr className="text-left text-xs text-gray-700">
-                          <th className="px-3 py-2">{t('adminTeams.add')}</th>
                           <th className="px-3 py-2">{t('adminTeams.player')}</th>
                           <th className="px-3 py-2">{t('adminTeams.category')}</th>
                           <th className="px-3 py-2">{t('adminTeams.province')}</th>
@@ -846,7 +884,7 @@ export default function AdminEquiposPage() {
                       <tbody>
                         {filteredPlayers.length === 0 ? (
                           <tr>
-                            <td className="px-3 py-3 text-gray-700" colSpan={5}>{t('adminTeams.noPlayers')}</td>
+                            <td className="px-3 py-3 text-gray-700" colSpan={4}>{t('adminTeams.noPlayers')}</td>
                           </tr>
                         ) : (
                           filteredPlayers.map((p) => {
@@ -857,23 +895,21 @@ export default function AdminEquiposPage() {
                             return (
                               <tr key={p.id} className="border-t border-gray-200">
                                 <td className="px-3 py-2">
-                                  <button
-                                    onClick={() => void assignPlayer(p.id)}
-                                    disabled={disabled}
-                                    className="rounded-xl border-2 border-gold-600/80 bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs px-3 py-2 disabled:opacity-60"
-                                  >
-                                    {isFull
-                                      ? t('adminTeams.full')
-                                      : alreadyInTeam
-                                        ? t('adminTeams.alreadyInTeam')
-                                        : assignBusy
-                                          ? t('adminTeams.assigning')
-                                          : t('adminTeams.add')}
-                                  </button>
-                                </td>
-                                <td className="px-3 py-2">
-                                  <div className="font-extrabold text-gray-900">{displayName(p)}</div>
-                                  <div className="text-xs text-gray-700">{shortId(p.id)}</div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => void assignPlayer(p.id)}
+                                      disabled={disabled}
+                                      className="w-6 h-6 rounded-full border border-blue-200 text-blue-600 disabled:border-gray-200 disabled:text-gray-400"
+                                      aria-label={t('adminTeams.add')}
+                                      title={isFull ? t('adminTeams.full') : alreadyInTeam ? t('adminTeams.alreadyInTeam') : t('adminTeams.add')}
+                                    >
+                                      +
+                                    </button>
+                                    <div>
+                                      <div className="font-extrabold text-gray-900">{displayName(p)}</div>
+                                      <div className="text-xs text-gray-700">{shortId(p.id)}</div>
+                                    </div>
+                                  </div>
                                 </td>
                                 <td className="px-3 py-2 text-gray-800">{p.category || '—'}</td>
                                 <td className="px-3 py-2 text-gray-800">{p.province || '—'}</td>

@@ -23,13 +23,13 @@ type AdminOption = {
   Icon: any;
 };
 
-const TILE_COLOR_CLASSES = [
-  'bg-gradient-to-br from-sky-500 to-sky-700 hover:from-sky-600 hover:to-sky-800',
-  'bg-gradient-to-br from-indigo-500 to-indigo-700 hover:from-indigo-600 hover:to-indigo-800',
-  'bg-gradient-to-br from-emerald-500 to-emerald-700 hover:from-emerald-600 hover:to-emerald-800',
-  'bg-gradient-to-br from-rose-500 to-rose-700 hover:from-rose-600 hover:to-rose-800',
-  'bg-gradient-to-br from-violet-500 to-violet-700 hover:from-violet-600 hover:to-violet-800',
-  'bg-gradient-to-br from-cyan-500 to-cyan-700 hover:from-cyan-600 hover:to-cyan-800',
+const TILE_BG_CLASSES = [
+  'bg-gradient-to-br from-fuchsia-400 via-pink-500 to-violet-700',
+  'bg-gradient-to-br from-lime-300 via-emerald-500 to-teal-700',
+  'bg-gradient-to-br from-cyan-300 via-sky-500 to-blue-700',
+  'bg-gradient-to-br from-yellow-300 via-amber-500 to-orange-700',
+  'bg-gradient-to-br from-rose-400 via-red-500 to-red-800',
+  'bg-gradient-to-br from-indigo-300 via-indigo-500 to-purple-700',
 ];
 
 export default function AdminPage() {
@@ -149,21 +149,21 @@ export default function AdminPage() {
           <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {adminOptions.map((option, idx) => {
               const Icon = option.Icon;
-              const colors = TILE_COLOR_CLASSES[idx % TILE_COLOR_CLASSES.length];
+              const tileBg = TILE_BG_CLASSES[idx % TILE_BG_CLASSES.length];
               return (
                 <Link
                   key={option.href}
                   href={option.href}
                   className={
-                    'premium-admin-tile flex flex-col items-center justify-center gap-3 text-center text-white border-4 border-gold-600/90 ' +
-                    'shadow-premium-sm hover:shadow-gold-lg hover:-translate-y-[2px] transition-transform ' +
-                    colors
+                    'premium-admin-tile premium-admin-neon-pulse premium-card group flex flex-col items-center justify-center gap-3 text-center border-2 border-gold-600/80 ' +
+                    'shadow-[0_0_24px_rgba(255,215,0,0.35),0_0_46px_rgba(56,189,248,0.35)] hover:shadow-[0_0_30px_rgba(255,215,0,0.5),0_0_56px_rgba(236,72,153,0.45)] hover:-translate-y-[3px] transition-all duration-200 ' +
+                    tileBg
                   }
                 >
-                  <span className="h-11 w-11 rounded-2xl bg-white/20 border border-white/25 flex items-center justify-center">
-                    <Icon className="h-5 w-5 text-white" />
+                  <span className="h-11 w-11 rounded-2xl bg-black/30 border border-white/45 backdrop-blur-[1px] flex items-center justify-center z-[1]">
+                    <Icon className="h-5 w-5 -translate-y-px text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]" />
                   </span>
-                  <span className="relative text-[15px] sm:text-base font-extrabold text-white leading-tight pr-8">
+                  <span className={`relative z-[1] inline-flex w-full items-center justify-center text-center text-[15px] sm:text-base font-extrabold text-white leading-none [text-shadow:0_1px_2px_rgba(0,0,0,0.95)] ${option.key === 'notificaciones' && unread > 0 ? 'pr-8' : ''}`}>
                     {option.label}
                     {option.key === 'notificaciones' && unread > 0 && (
                       <span className="absolute right-0 top-1/2 -translate-y-1/2 min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-[12px] font-extrabold inline-flex items-center justify-center">

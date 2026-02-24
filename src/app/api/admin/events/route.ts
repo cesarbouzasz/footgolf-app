@@ -267,11 +267,70 @@ export async function POST(req: NextRequest) {
 
     const competitionMode = normalizeMode(body?.competition_mode);
     const config = isPlainObject(body?.config) ? body.config : {};
+    const isChampionshipEvent = !!(config as any)?.isChampionship;
+
+    const competitionTypeSet = new Set(['individual', 'parejas', 'equipos']);
+    const competitionsRaw = Array.isArray(body?.competitions) ? body.competitions : [];
+    const competitionsPayload: any[] = [];
+    const competitionCourseIds = new Set<string>();
+
+    for (const raw of competitionsRaw) {
+      if (!isPlainObject(raw)) continue;
+      const type = String(raw?.type || '').trim().toLowerCase();
+      if (!competitionTypeSet.has(type)) {
+        return NextResponse.json({ ok: false, error: 'Invalid competition type' }, { status: 200 });
+      }
+      const compName = String(raw?.name || '').trim();
+      if (!compName) {
+        return NextResponse.json({ ok: false, error: 'Missing competition name' }, { status: 200 });
+      }
+      const registrationStartComp = raw?.registration_start;
+      if (registrationStartComp != null && registrationStartComp !== '' && !isIsoDate(registrationStartComp)) {
+        return NextResponse.json({ ok: false, error: 'Invalid competition registration_start' }, { status: 200 });
+      }
+      const registrationEndComp = raw?.registration_end;
+      if (registrationEndComp != null && registrationEndComp !== '' && !isIsoDate(registrationEndComp)) {
+        return NextResponse.json({ ok: false, error: 'Invalid competition registration_end' }, { status: 200 });
+      }
+
+      const courseId = typeof raw?.course_id === 'string' ? raw.course_id.trim() : '';
+      if (courseId) {
+        if (!isUuid(courseId)) {
+          return NextResponse.json({ ok: false, error: 'Invalid competition course_id' }, { status: 200 });
+        }
+        competitionCourseIds.add(courseId);
+      } else if (!isChampionshipEvent) {
+        return NextResponse.json({ ok: false, error: 'Invalid competition course_id' }, { status: 200 });
+      }
+
+      const maxPlayersComp = raw?.max_players;
+      if (maxPlayersComp != null) {
+        if (!Number.isInteger(maxPlayersComp) || !Number.isFinite(maxPlayersComp) || maxPlayersComp < 1 || maxPlayersComp > 256) {
+          return NextResponse.json({ ok: false, error: 'Invalid competition max_players (1..256)' }, { status: 200 });
+        }
+      }
+
+      const status = typeof raw?.status === 'string' ? raw.status.trim() : null;
+      const statusMode = String(raw?.status_mode || '').trim().toLowerCase() === 'manual' ? 'manual' : 'auto';
+      const compConfig = isPlainObject(raw?.config) ? raw.config : {};
+
+      competitionsPayload.push({
+        competition_type: type,
+        name: compName,
+        registration_start: registrationStartComp ? String(registrationStartComp) : null,
+        registration_end: registrationEndComp ? String(registrationEndComp) : null,
+        course_id: courseId || null,
+        status: status || null,
+        status_mode: statusMode,
+        max_players: maxPlayersComp ?? null,
+        config: compConfig,
+      });
+    }
 
     const maxPlayers = (config as any)?.maxPlayers;
     if (maxPlayers != null) {
-      if (!Number.isInteger(maxPlayers) || !Number.isFinite(maxPlayers) || maxPlayers < 2 || maxPlayers > 256) {
-        return NextResponse.json({ ok: false, error: 'Config inválida: maxPlayers debe ser entero (2..256).' }, { status: 200 });
+      if (!Number.isInteger(maxPlayers) || !Number.isFinite(maxPlayers) || maxPlayers < 1 || maxPlayers > 256) {
+        return NextResponse.json({ ok: false, error: 'Config inválida: maxPlayers debe ser entero (1..256).' }, { status: 200 });
       }
     }
     const isMatchPlay = !!competitionMode && (competitionMode.includes('match') || competitionMode.includes('mp'));
@@ -286,10 +345,10 @@ export async function POST(req: NextRequest) {
     }
 
     const courseIdRaw = typeof body?.course_id === 'string' ? body.course_id.trim() : '';
-    if (!courseIdRaw) {
+    if (!courseIdRaw && !isChampionshipEvent) {
       return NextResponse.json({ ok: false, error: 'Missing course_id' }, { status: 200 });
     }
-    if (!isUuid(courseIdRaw)) {
+    if (courseIdRaw && !isUuid(courseIdRaw)) {
       return NextResponse.json({ ok: false, error: 'Invalid course_id' }, { status: 200 });
     }
 
@@ -306,6 +365,28 @@ export async function POST(req: NextRequest) {
       const courseAssociationId = (courseRow as any)?.association_id || null;
       if (courseAssociationId && String(courseAssociationId) !== associationIdRaw) {
         return NextResponse.json({ ok: false, error: 'Course does not belong to association' }, { status: 200 });
+      }
+    }
+
+    if (competitionCourseIds.size > 0) {
+      const { data: courseRows, error: coursesError } = await supabaseAdmin
+        .from('courses')
+        .select('id, association_id')
+        .in('id', Array.from(competitionCourseIds));
+
+      if (coursesError) {
+        return NextResponse.json({ ok: false, error: coursesError.message }, { status: 200 });
+      }
+
+      const byId = new Map(((courseRows as any[]) || []).map((row) => [String(row.id), String(row.association_id || '')]));
+      for (const courseId of competitionCourseIds) {
+        const assocId = byId.get(courseId) || '';
+        if (!assocId) {
+          return NextResponse.json({ ok: false, error: 'Competition course not found' }, { status: 200 });
+        }
+        if (assocId !== associationIdRaw) {
+          return NextResponse.json({ ok: false, error: 'Competition course does not belong to association' }, { status: 200 });
+        }
       }
     }
 
@@ -331,7 +412,36 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 200 });
-    return NextResponse.json({ ok: true, id: (data as any)?.id || null }, { status: 200 });
+
+    const eventId = (data as any)?.id || null;
+    if (eventId && competitionsPayload.length > 0) {
+      const { data: compRows, error: compError } = await supabaseAdmin
+        .from('event_competitions')
+        .insert(competitionsPayload.map((row) => ({
+          ...row,
+          event_id: eventId,
+          association_id: associationIdRaw,
+        })))
+        .select('id, competition_type');
+
+      if (compError) {
+        return NextResponse.json({ ok: false, error: compError.message }, { status: 200 });
+      }
+
+      const byType: Record<string, string> = {};
+      (compRows as any[]).forEach((row) => {
+        const type = String(row?.competition_type || '').trim();
+        const id = String(row?.id || '').trim();
+        if (type && id) byType[type] = id;
+      });
+
+      const nextConfig = { ...config, competitionIds: Object.values(byType), competitionByType: byType };
+      await supabaseAdmin
+        .from('events')
+        .update({ config: nextConfig })
+        .eq('id', eventId);
+    }
+    return NextResponse.json({ ok: true, id: eventId }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || 'Server error' }, { status: 200 });
   }

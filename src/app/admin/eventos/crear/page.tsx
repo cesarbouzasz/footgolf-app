@@ -1,8 +1,8 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, DoorOpen, PlusCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, DoorOpen, PlusCircle, X } from 'lucide-react';
 import { useAuth } from '@/context/auth-context';
 import { supabase } from '@/lib/supabase';
 import AssociationSelector from '@/components/AssociationSelector';
@@ -13,10 +13,35 @@ type CourseLite = { id: string; name: string };
 type EventFormat = 'stableford' | 'match';
 type MatchPlayFormat = 'classic' | 'groups';
 type GroupMode = 'single' | 'multi';
-type StablefordMode = 'classic' | 'best_card' | 'best_hole' | 'weekly';
+type StablefordMode = 'classic' | 'best_card' | 'best_hole';
+type PairPlayMode = 'copa_canada' | 'fourball' | 'foursomes';
 type PointsMode = 'manual' | 'percent';
 type StartMode = 'tiro' | 'hoyo_intervalo' | 'libre';
 type PriceRow = { category: string; price: string; currency: string };
+type CompetitionType = 'individual' | 'parejas' | 'equipos';
+type CompetitionDraft = {
+  enabled: boolean;
+  name: string;
+  registrationStart: string;
+  registrationEnd: string;
+  courseId: string;
+  status: string;
+  statusMode: 'auto' | 'manual';
+  maxPlayersRaw: string;
+  priceRows: PriceRow[];
+  stablefordMode: StablefordMode;
+  pairsPlayMode: PairPlayMode;
+  classicRoundsRaw: string;
+  bestCardRoundsRaw: string;
+  bestCardMaxAttemptsRaw: string;
+  bestHoleRoundsRaw: string;
+  pointsMode: PointsMode;
+  pointsFirstRaw: string;
+  pointsDecayRaw: string;
+  pointsPodiumRaw: string;
+  pointsTableRaw: string;
+  stablefordAttemptsByUser: string;
+};
 type ChampHubEventDraft = {
   eventId: string;
   kind: 'simple' | 'doble';
@@ -26,9 +51,21 @@ type ChampHubEventDraft = {
   podiumRaw: string;
   tableRaw: string;
 };
-type EventLite = { id: string; name: string };
+type EventLite = { id: string; name: string; event_date?: string | null; config?: any | null };
 
-const CATEGORY_OPTIONS = ['Masculino', 'Femenino', 'Senior', 'Senior+', 'Junior'];
+const CATEGORY_OPTIONS = ['General', 'Masculino', 'Femenino', 'Senior', 'Senior+', 'Junior'];
+const COMPETITION_TYPES: CompetitionType[] = ['individual', 'parejas', 'equipos'];
+const STABLEFORD_MODE_OPTIONS = [
+  { value: 'classic', label: 'adminEventsCreate.stablefordClassicLabel' },
+  { value: 'best_card', label: 'adminEventsCreate.stablefordBestCardLabel' },
+  { value: 'best_hole', label: 'adminEventsCreate.stablefordBestHoleLabel' },
+];
+
+const PAIR_PLAY_MODE_OPTIONS: Array<{ value: PairPlayMode; label: string }> = [
+  { value: 'copa_canada', label: 'adminEventsCreate.pairModeCanada' },
+  { value: 'fourball', label: 'adminEventsCreate.pairModeFourball' },
+  { value: 'foursomes', label: 'adminEventsCreate.pairModeFoursomes' },
+];
 
 const inputClassName =
   'w-full rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200';
@@ -52,6 +89,10 @@ type EventTemplateItem = {
   updatedAt: string;
 };
 
+const buildDefaultPriceRows = (): PriceRow[] => ([
+  { category: CATEGORY_OPTIONS[0], price: '', currency: 'EUR' },
+]);
+
 const buildDefaultChampHubEvent = (): ChampHubEventDraft => ({
   eventId: '',
   kind: 'simple',
@@ -62,8 +103,53 @@ const buildDefaultChampHubEvent = (): ChampHubEventDraft => ({
   tableRaw: '',
 });
 
+const getCompetitionLabel = (type: CompetitionType, t: (path: string) => string) => {
+  switch (type) {
+    case 'individual':
+      return t('adminEventsCreate.modalityIndividual');
+    case 'parejas':
+      return t('adminEventsCreate.modalityPairs');
+    case 'equipos':
+      return t('adminEventsCreate.modalityTeams');
+    default:
+      return type;
+  }
+};
+
+const buildCompetitionName = (eventName: string, type: CompetitionType, t: (path: string) => string) => {
+  const base = eventName.trim();
+  const label = getCompetitionLabel(type, t);
+  return base ? `${base} - ${label}` : label;
+};
+
+const buildDefaultCompetitionDraft = (eventName: string, type: CompetitionType, t: (path: string) => string): CompetitionDraft => ({
+  enabled: type === 'individual',
+  name: buildCompetitionName(eventName, type, t),
+  registrationStart: '',
+  registrationEnd: '',
+  courseId: '',
+  status: 'inscripcion',
+  statusMode: 'auto',
+  maxPlayersRaw: '',
+  priceRows: buildDefaultPriceRows(),
+  stablefordMode: 'classic',
+  pairsPlayMode: 'copa_canada',
+  classicRoundsRaw: '1',
+  bestCardRoundsRaw: '1',
+  bestCardMaxAttemptsRaw: '',
+  bestHoleRoundsRaw: '2',
+  pointsMode: 'percent',
+  pointsFirstRaw: '100',
+  pointsDecayRaw: '8',
+  pointsPodiumRaw: '3',
+  pointsTableRaw: '',
+  stablefordAttemptsByUser: '1',
+});
+
 const getCategoryLabel = (category: string, t: (path: string) => string) => {
   switch (category) {
+    case 'General':
+      return t('categories.general');
     case 'Masculino':
       return t('categories.male');
     case 'Femenino':
@@ -120,6 +206,11 @@ function parseDateList(raw: string): string[] {
     .filter(isIsoDate);
 }
 
+function isChampionshipEventRow(eventLike: any) {
+  const config = eventLike?.config || {};
+  return !!config?.isChampionship || !!config?.championshipHub?.enabled;
+}
+
 export default function AdminCrearEventoPage() {
   const { user, profile, loading, isAdmin, currentAssociationId } = useAuth();
   const { t } = useLanguage();
@@ -135,9 +226,7 @@ export default function AdminCrearEventoPage() {
   const [courseId, setCourseId] = useState<string>('');
   const [status, setStatus] = useState<string>('inscripcion');
   const [maxPlayersRaw, setMaxPlayersRaw] = useState('');
-  const [priceRows, setPriceRows] = useState<PriceRow[]>(() => ([
-    { category: CATEGORY_OPTIONS[0], price: '', currency: 'EUR' },
-  ]));
+  const [priceRows, setPriceRows] = useState<PriceRow[]>(() => buildDefaultPriceRows());
 
   const [format, setFormat] = useState<EventFormat>('stableford');
   const [teamCompetitionEnabled, setTeamCompetitionEnabled] = useState(false);
@@ -157,19 +246,25 @@ export default function AdminCrearEventoPage() {
   const [groupAdvanceRaw, setGroupAdvanceRaw] = useState('');
   const [groupHasConsolation, setGroupHasConsolation] = useState(false);
 
-  const [stablefordMode, setStablefordMode] = useState<StablefordMode>('classic');
-  const [classicRoundsRaw, setClassicRoundsRaw] = useState('1');
-  const [bestCardRoundsRaw, setBestCardRoundsRaw] = useState('2');
-  const [bestCardMaxAttemptsRaw, setBestCardMaxAttemptsRaw] = useState('');
-  const [bestHoleRoundsRaw, setBestHoleRoundsRaw] = useState('2');
-  const [weeklyAllowExtraAttempts, setWeeklyAllowExtraAttempts] = useState(false);
-  const [weeklyMaxAttemptsRaw, setWeeklyMaxAttemptsRaw] = useState('');
+  const [competitionDrafts, setCompetitionDrafts] = useState<Record<CompetitionType, CompetitionDraft>>(() => ({
+    individual: buildDefaultCompetitionDraft('', 'individual', t),
+    parejas: buildDefaultCompetitionDraft('', 'parejas', t),
+    equipos: buildDefaultCompetitionDraft('', 'equipos', t),
+  }));
 
-  const [pointsMode, setPointsMode] = useState<PointsMode>('percent');
-  const [pointsFirstRaw, setPointsFirstRaw] = useState('100');
-  const [pointsDecayRaw, setPointsDecayRaw] = useState('8');
-  const [pointsPodiumRaw, setPointsPodiumRaw] = useState('3');
-  const [pointsTableRaw, setPointsTableRaw] = useState('');
+  const primaryCompetitionDraft = competitionDrafts.individual;
+  const stablefordMode = primaryCompetitionDraft?.stablefordMode ?? 'classic';
+  const classicRoundsRaw = primaryCompetitionDraft?.classicRoundsRaw ?? '1';
+  const bestCardRoundsRaw = primaryCompetitionDraft?.bestCardRoundsRaw ?? '1';
+  const bestCardMaxAttemptsRaw = primaryCompetitionDraft?.bestCardMaxAttemptsRaw ?? '';
+  const bestHoleRoundsRaw = primaryCompetitionDraft?.bestHoleRoundsRaw ?? '2';
+  const weeklyAllowExtraAttempts = false;
+  const weeklyMaxAttemptsRaw = '';
+  const pointsMode = primaryCompetitionDraft?.pointsMode ?? 'percent';
+  const pointsFirstRaw = primaryCompetitionDraft?.pointsFirstRaw ?? '';
+  const pointsDecayRaw = primaryCompetitionDraft?.pointsDecayRaw ?? '';
+  const pointsPodiumRaw = primaryCompetitionDraft?.pointsPodiumRaw ?? '';
+  const pointsTableRaw = primaryCompetitionDraft?.pointsTableRaw ?? '';
 
   const [champEnabled, setChampEnabled] = useState(false);
   const [champTotalRaw, setChampTotalRaw] = useState('');
@@ -183,6 +278,9 @@ export default function AdminCrearEventoPage() {
   const [champHubCategories, setChampHubCategories] = useState<string[]>(CATEGORY_OPTIONS);
   const [champHubEvents, setChampHubEvents] = useState<ChampHubEventDraft[]>([]);
   const [associationEvents, setAssociationEvents] = useState<EventLite[]>([]);
+  const [associationChampionships, setAssociationChampionships] = useState<EventLite[]>([]);
+  const [selectedChampionshipId, setSelectedChampionshipId] = useState('');
+  const [championshipMembershipIds, setChampionshipMembershipIds] = useState<string[]>([]);
 
   // Match Play config
   const [holesPerRoundRaw, setHolesPerRoundRaw] = useState('18');
@@ -197,6 +295,8 @@ export default function AdminCrearEventoPage() {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  const [createdId, setCreatedId] = useState<string | null>(null);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [templates, setTemplates] = useState<EventTemplateItem[]>([]);
@@ -249,21 +349,33 @@ export default function AdminCrearEventoPage() {
     const loadEvents = async () => {
       if (!currentAssociationId) {
         if (active) setAssociationEvents([]);
+        if (active) setAssociationChampionships([]);
         return;
       }
       const { data, error } = await supabase
         .from('events')
-        .select('id, name')
+        .select('id, name, event_date, config')
         .eq('association_id', currentAssociationId)
         .order('event_date', { ascending: false });
       if (!active) return;
       if (error) {
         setAssociationEvents([]);
+        setAssociationChampionships([]);
         return;
       }
-      setAssociationEvents(
-        ((data as any[]) || []).map((r) => ({ id: String(r.id), name: String(r.name || '') }))
-      );
+      const rows = ((data as any[]) || []).map((r) => ({
+        id: String(r.id),
+        name: String(r.name || ''),
+        event_date: r.event_date ? String(r.event_date) : null,
+        config: r.config || null,
+      }));
+      const championships = rows.filter((row) => isChampionshipEventRow(row));
+      const tournaments = rows.filter((row) => !isChampionshipEventRow(row));
+      setAssociationEvents(tournaments);
+      setAssociationChampionships(championships);
+
+      setChampionshipMembershipIds((prev) => prev.filter((id) => championships.some((row) => row.id === id)));
+      setSelectedChampionshipId((prev) => (prev && championships.some((row) => row.id === prev) ? prev : ''));
     };
     void loadEvents();
     return () => {
@@ -331,6 +443,34 @@ export default function AdminCrearEventoPage() {
     }
   }, [selectedTemplateId, templateName, templates]);
 
+  const updateCompetitionDraft = (type: CompetitionType, patch: Partial<CompetitionDraft>) => {
+    setCompetitionDrafts((prev) => ({
+      ...prev,
+      [type]: {
+        ...prev[type],
+        ...patch,
+      },
+    }));
+  };
+
+  const toggleCompetition = (type: CompetitionType) => {
+    setCompetitionDrafts((prev) => {
+      const current = prev[type];
+      const nextEnabled = !current?.enabled;
+      const nextName = current?.name?.trim()
+        ? current.name
+        : buildCompetitionName(name, type, t);
+      return {
+        ...prev,
+        [type]: {
+          ...current,
+          enabled: nextEnabled,
+          name: nextName,
+        },
+      };
+    });
+  };
+
   const canSave = useMemo(() => {
     if (!currentAssociationId) return false;
     if (!name.trim()) return false;
@@ -340,10 +480,13 @@ export default function AdminCrearEventoPage() {
     if (eventEndDate && isIsoDate(eventDate) && eventEndDate < eventDate) return false;
     if (registrationStart && !isIsoDate(registrationStart)) return false;
     if (registrationEnd && !isIsoDate(registrationEnd)) return false;
+    if (registrationStart && registrationEnd && registrationEnd < registrationStart) return false;
 
-    if (maxPlayersRaw.trim()) {
-      const n = Number.parseInt(maxPlayersRaw, 10);
-      if (!Number.isFinite(n) || n < 2 || n > 256) return false;
+    if (format !== 'stableford') {
+      if (maxPlayersRaw.trim()) {
+        const n = Number.parseInt(maxPlayersRaw, 10);
+        if (!Number.isFinite(n) || n < 2 || n > 256) return false;
+      }
     }
 
     if (teamCompetitionEnabled && teamBestPlayersRaw.trim()) {
@@ -360,59 +503,48 @@ export default function AdminCrearEventoPage() {
     }
 
     if (format === 'stableford') {
-      if (stablefordMode === 'classic') {
-        const rounds = Number.parseInt(classicRoundsRaw, 10);
-        if (!Number.isFinite(rounds) || rounds < 1 || rounds > 4) return false;
+      const enabledCompetitions = COMPETITION_TYPES.filter((type) => competitionDrafts[type]?.enabled);
+      if (enabledCompetitions.length === 0) return false;
 
-        if (pointsMode === 'manual') {
-          const table = parseIntList(pointsTableRaw);
-          if (table.length === 0) return false;
-        } else {
-          const first = Number.parseInt(pointsFirstRaw, 10);
-          const decay = Number.parseFloat(pointsDecayRaw);
-          const podium = Number.parseInt(pointsPodiumRaw, 10);
-          if (!Number.isFinite(first) || first < 1) return false;
-          if (!Number.isFinite(decay) || decay < 0 || decay > 100) return false;
-          if (!Number.isFinite(podium) || podium < 1) return false;
+      for (const type of enabledCompetitions) {
+        const draft = competitionDrafts[type];
+        if (!draft) return false;
+
+        if (draft.maxPlayersRaw.trim()) {
+          const n = Number.parseInt(draft.maxPlayersRaw, 10);
+          if (!Number.isFinite(n) || n < 1 || n > 256) return false;
         }
-      } else if (stablefordMode === 'best_card') {
-        const rounds = Number.parseInt(bestCardRoundsRaw, 10);
-        if (!Number.isFinite(rounds) || rounds < 1) return false;
-        if (bestCardMaxAttemptsRaw.trim()) {
-          const maxAttempts = Number.parseInt(bestCardMaxAttemptsRaw, 10);
-          if (!Number.isFinite(maxAttempts) || maxAttempts < 1) return false;
-        }
-      } else if (stablefordMode === 'best_hole') {
-        const rounds = Number.parseInt(bestHoleRoundsRaw, 10);
-        if (!Number.isFinite(rounds) || rounds < 2) return false;
-      } else {
-        if (weeklyAllowExtraAttempts && weeklyMaxAttemptsRaw.trim()) {
-          const maxAttempts = Number.parseInt(weeklyMaxAttemptsRaw, 10);
-          if (!Number.isFinite(maxAttempts) || maxAttempts < 1) return false;
+
+        if (draft.stablefordMode === 'classic') {
+          const rounds = Number.parseInt(draft.classicRoundsRaw, 10);
+          if (!Number.isFinite(rounds) || rounds < 1 || rounds > 4) return false;
+
+          if (draft.pointsMode === 'manual') {
+            const table = parseIntList(draft.pointsTableRaw);
+            if (table.length === 0) return false;
+          } else {
+            const first = Number.parseInt(draft.pointsFirstRaw, 10);
+            const decay = Number.parseFloat(draft.pointsDecayRaw);
+            const podium = Number.parseInt(draft.pointsPodiumRaw, 10);
+            if (!Number.isFinite(first) || first < 1) return false;
+            if (!Number.isFinite(decay) || decay < 0 || decay > 100) return false;
+            if (!Number.isFinite(podium) || podium < 1) return false;
+          }
+        } else if (draft.stablefordMode === 'best_card') {
+          const rounds = Number.parseInt(draft.bestCardRoundsRaw, 10);
+          if (!Number.isFinite(rounds) || rounds < 1) return false;
+          if (draft.bestCardMaxAttemptsRaw.trim()) {
+            const maxAttempts = Number.parseInt(draft.bestCardMaxAttemptsRaw, 10);
+            if (!Number.isFinite(maxAttempts) || maxAttempts < 1) return false;
+          }
+        } else if (draft.stablefordMode === 'best_hole') {
+          const rounds = Number.parseInt(draft.bestHoleRoundsRaw, 10);
+          if (!Number.isFinite(rounds) || rounds < 2) return false;
         }
       }
 
       if (champEnabled) {
-        const total = Number.parseInt(champTotalRaw, 10);
-        if (!Number.isFinite(total) || total < 1) return false;
-
-        const simple = champSimpleRaw.trim() ? Number.parseInt(champSimpleRaw, 10) : 0;
-        const double = champDoubleRaw.trim() ? Number.parseInt(champDoubleRaw, 10) : 0;
-        if ((champSimpleRaw.trim() && (!Number.isFinite(simple) || simple < 0)) ||
-            (champDoubleRaw.trim() && (!Number.isFinite(double) || double < 0))) {
-          return false;
-        }
-        if ((simple + double) > total) return false;
-
-        const bestSimple = champBestSimpleRaw.trim() ? Number.parseInt(champBestSimpleRaw, 10) : 0;
-        const bestDouble = champBestDoubleRaw.trim() ? Number.parseInt(champBestDoubleRaw, 10) : 0;
-        if ((champBestSimpleRaw.trim() && (!Number.isFinite(bestSimple) || bestSimple < 0)) ||
-            (champBestDoubleRaw.trim() && (!Number.isFinite(bestDouble) || bestDouble < 0))) {
-          return false;
-        }
-        if (bestSimple > simple || bestDouble > double) return false;
-
-        if (!champCategories.length) return false;
+        if (!championshipMembershipIds.length) return false;
       }
 
       if (champHubEnabled) {
@@ -475,15 +607,15 @@ export default function AdminCrearEventoPage() {
     }
 
     return true;
-  }, [currentAssociationId, name, eventDate, eventEndDate, registrationStart, registrationEnd, courseId, maxPlayersRaw, teamCompetitionEnabled, teamBestPlayersRaw, startMode, startHoleRaw, startTimeRaw, startIntervalRaw, format, matchPlayFormat, holesPerRoundRaw, hasConsolation, consolationHolesPerRoundRaw, hasSeeds, seedCountRaw, groupMode, groupHolesRaw, groupMatchesPerDayRaw, groupDatesRaw, groupCountRaw, groupAdvanceRaw, stablefordMode, classicRoundsRaw, bestCardRoundsRaw, bestCardMaxAttemptsRaw, bestHoleRoundsRaw, weeklyAllowExtraAttempts, weeklyMaxAttemptsRaw, pointsMode, pointsFirstRaw, pointsDecayRaw, pointsPodiumRaw, pointsTableRaw, champEnabled, champTotalRaw, champSimpleRaw, champDoubleRaw, champBestSimpleRaw, champBestDoubleRaw, champCategories, champHubEnabled, champHubCategories, champHubEvents]);
+  }, [currentAssociationId, name, eventDate, eventEndDate, registrationStart, registrationEnd, courseId, maxPlayersRaw, teamCompetitionEnabled, teamBestPlayersRaw, startMode, startHoleRaw, startTimeRaw, startIntervalRaw, format, matchPlayFormat, holesPerRoundRaw, hasConsolation, consolationHolesPerRoundRaw, hasSeeds, seedCountRaw, groupMode, groupHolesRaw, groupMatchesPerDayRaw, groupDatesRaw, groupCountRaw, groupAdvanceRaw, competitionDrafts, champEnabled, championshipMembershipIds, champHubEnabled, champHubCategories, champHubEvents]);
 
   const validation = useMemo(() => {
     const endDateInvalid = !!eventEndDate && (!isIsoDate(eventEndDate) || (isIsoDate(eventDate) && eventEndDate < eventDate));
     const registrationStartInvalid = !!registrationStart && !isIsoDate(registrationStart);
-    const registrationEndInvalid = !!registrationEnd && !isIsoDate(registrationEnd);
+    const registrationEndInvalid = !!registrationEnd && (!isIsoDate(registrationEnd) || (!!registrationStart && registrationEnd < registrationStart));
 
     let maxPlayersInvalid = false;
-    if (maxPlayersRaw.trim()) {
+    if (format !== 'stableford' && maxPlayersRaw.trim()) {
       const n = Number.parseInt(maxPlayersRaw, 10);
       maxPlayersInvalid = !Number.isFinite(n) || n < 2 || n > 256;
     }
@@ -501,6 +633,57 @@ export default function AdminCrearEventoPage() {
       startModeInvalid = !startTimeRaw.trim() || !Number.isFinite(hole) || hole < 1 || hole > 36 || !Number.isFinite(interval) || interval < 1;
     }
 
+    const enabledCompetitions = format === 'stableford'
+      ? COMPETITION_TYPES.filter((type) => competitionDrafts[type]?.enabled)
+      : [];
+    const competitionsMissing = format === 'stableford' && enabledCompetitions.length === 0;
+    const competitionNameInvalid = false;
+    const competitionRegistrationInvalid = false;
+    const competitionCourseInvalid = false;
+    const competitionMaxPlayersInvalid = format === 'stableford'
+      && enabledCompetitions.some((type) => {
+        const draft = competitionDrafts[type];
+        if (!draft || !draft.maxPlayersRaw.trim()) return false;
+        const n = Number.parseInt(draft.maxPlayersRaw, 10);
+        return !Number.isFinite(n) || n < 1 || n > 256;
+      });
+    const stablefordClassicRoundsInvalid = format === 'stableford'
+      && enabledCompetitions.some((type) => {
+        const draft = competitionDrafts[type];
+        if (!draft || draft.stablefordMode !== 'classic') return false;
+        const rounds = Number.parseInt(draft.classicRoundsRaw, 10);
+        return !Number.isFinite(rounds) || rounds < 1 || rounds > 4;
+      });
+    const stablefordPointsInvalid = format === 'stableford'
+      && enabledCompetitions.some((type) => {
+        const draft = competitionDrafts[type];
+        if (!draft || draft.stablefordMode !== 'classic') return false;
+        if (draft.pointsMode === 'manual') return parseIntList(draft.pointsTableRaw).length === 0;
+        const first = Number.parseInt(draft.pointsFirstRaw, 10);
+        const decay = Number.parseFloat(draft.pointsDecayRaw);
+        const podium = Number.parseInt(draft.pointsPodiumRaw, 10);
+        return !Number.isFinite(first) || first < 1
+          || !Number.isFinite(decay) || decay < 0 || decay > 100
+          || !Number.isFinite(podium) || podium < 1;
+      });
+    const stablefordBestCardInvalid = format === 'stableford'
+      && enabledCompetitions.some((type) => {
+        const draft = competitionDrafts[type];
+        if (!draft || draft.stablefordMode !== 'best_card') return false;
+        const rounds = Number.parseInt(draft.bestCardRoundsRaw, 10);
+        if (!Number.isFinite(rounds) || rounds < 1) return true;
+        if (!draft.bestCardMaxAttemptsRaw.trim()) return false;
+        const maxAttempts = Number.parseInt(draft.bestCardMaxAttemptsRaw, 10);
+        return !Number.isFinite(maxAttempts) || maxAttempts < 1;
+      });
+    const stablefordBestHoleInvalid = format === 'stableford'
+      && enabledCompetitions.some((type) => {
+        const draft = competitionDrafts[type];
+        if (!draft || draft.stablefordMode !== 'best_hole') return false;
+        const rounds = Number.parseInt(draft.bestHoleRoundsRaw, 10);
+        return !Number.isFinite(rounds) || rounds < 2;
+      });
+
     return {
       nameMissing: !name.trim(),
       courseMissing: !courseId.trim(),
@@ -511,8 +694,17 @@ export default function AdminCrearEventoPage() {
       maxPlayersInvalid,
       teamBestPlayersInvalid,
       startModeInvalid,
+      competitionsMissing,
+      competitionNameInvalid,
+      competitionRegistrationInvalid,
+      competitionCourseInvalid,
+      competitionMaxPlayersInvalid,
+      stablefordClassicRoundsInvalid,
+      stablefordPointsInvalid,
+      stablefordBestCardInvalid,
+      stablefordBestHoleInvalid,
     };
-  }, [courseId, eventDate, eventEndDate, maxPlayersRaw, name, registrationEnd, registrationStart, startHoleRaw, startIntervalRaw, startMode, startTimeRaw, teamBestPlayersRaw, teamCompetitionEnabled]);
+  }, [competitionDrafts, courseId, eventDate, eventEndDate, format, maxPlayersRaw, name, registrationEnd, registrationStart, startHoleRaw, startIntervalRaw, startMode, startTimeRaw, teamBestPlayersRaw, teamCompetitionEnabled]);
 
   const withError = (base: string, hasError: boolean) =>
     hasError ? `${base} border-red-400 focus:ring-red-200` : base;
@@ -528,6 +720,8 @@ export default function AdminCrearEventoPage() {
     const payload = {
       format,
       status,
+      registrationStart,
+      registrationEnd,
       description,
       courseId,
       maxPlayersRaw,
@@ -551,19 +745,9 @@ export default function AdminCrearEventoPage() {
       consolationHolesPerRoundRaw,
       hasSeeds,
       seedCountRaw,
-      stablefordMode,
-      classicRoundsRaw,
-      bestCardRoundsRaw,
-      bestCardMaxAttemptsRaw,
-      bestHoleRoundsRaw,
-      weeklyAllowExtraAttempts,
-      weeklyMaxAttemptsRaw,
-      pointsMode,
-      pointsFirstRaw,
-      pointsDecayRaw,
-      pointsPodiumRaw,
-      pointsTableRaw,
+      competitionDrafts,
       champEnabled,
+      championshipMembershipIds,
       champTotalRaw,
       champSimpleRaw,
       champDoubleRaw,
@@ -625,10 +809,12 @@ export default function AdminCrearEventoPage() {
       const data = (template.payload || {}) as Record<string, any>;
       setFormat(data.format || 'stableford');
       setStatus(data.status || 'inscripcion');
+      setRegistrationStart(data.registrationStart || '');
+      setRegistrationEnd(data.registrationEnd || '');
       setDescription(data.description || '');
       setCourseId(data.courseId || '');
       setMaxPlayersRaw(data.maxPlayersRaw || '');
-      setPriceRows(Array.isArray(data.priceRows) && data.priceRows.length ? data.priceRows : [{ category: CATEGORY_OPTIONS[0], price: '', currency: 'EUR' }]);
+      setPriceRows(Array.isArray(data.priceRows) && data.priceRows.length ? data.priceRows : buildDefaultPriceRows());
       setTeamCompetitionEnabled(!!data.teamCompetitionEnabled);
       setTeamBestPlayersRaw(data.teamBestPlayersRaw || '');
       setStartMode(data.startMode || 'tiro');
@@ -648,19 +834,47 @@ export default function AdminCrearEventoPage() {
       setConsolationHolesPerRoundRaw(data.consolationHolesPerRoundRaw || '');
       setHasSeeds(!!data.hasSeeds);
       setSeedCountRaw(data.seedCountRaw || '');
-      setStablefordMode(data.stablefordMode || 'classic');
-      setClassicRoundsRaw(data.classicRoundsRaw || '1');
-      setBestCardRoundsRaw(data.bestCardRoundsRaw || '2');
-      setBestCardMaxAttemptsRaw(data.bestCardMaxAttemptsRaw || '');
-      setBestHoleRoundsRaw(data.bestHoleRoundsRaw || '2');
-      setWeeklyAllowExtraAttempts(!!data.weeklyAllowExtraAttempts);
-      setWeeklyMaxAttemptsRaw(data.weeklyMaxAttemptsRaw || '');
-      setPointsMode(data.pointsMode || 'percent');
-      setPointsFirstRaw(data.pointsFirstRaw || '100');
-      setPointsDecayRaw(data.pointsDecayRaw || '8');
-      setPointsPodiumRaw(data.pointsPodiumRaw || '3');
-      setPointsTableRaw(data.pointsTableRaw || '');
+      const draftPayload = data.competitionDrafts && typeof data.competitionDrafts === 'object'
+        ? data.competitionDrafts
+        : null;
+      const nextDrafts = { ...competitionDrafts };
+      COMPETITION_TYPES.forEach((type) => {
+        const base = buildDefaultCompetitionDraft('', type, t);
+        const from = draftPayload?.[type] || null;
+        const draft = from && typeof from === 'object' ? from : {};
+        const priceRows = Array.isArray(draft.priceRows) && draft.priceRows.length
+          ? draft.priceRows
+          : buildDefaultPriceRows();
+        nextDrafts[type] = {
+          ...base,
+          ...draft,
+          enabled: !!draft.enabled,
+          name: String(draft.name || base.name),
+          registrationStart: String(draft.registrationStart || ''),
+          registrationEnd: String(draft.registrationEnd || ''),
+          courseId: String(draft.courseId || ''),
+          status: String(draft.status || base.status),
+          statusMode: draft.statusMode === 'manual' ? 'manual' : 'auto',
+          maxPlayersRaw: String(draft.maxPlayersRaw || ''),
+          priceRows,
+          stablefordMode: draft.stablefordMode === 'best_card' || draft.stablefordMode === 'best_hole'
+            ? draft.stablefordMode
+            : 'classic',
+          classicRoundsRaw: String(draft.classicRoundsRaw || '1'),
+          bestCardRoundsRaw: String(draft.bestCardRoundsRaw || '1'),
+          bestCardMaxAttemptsRaw: String(draft.bestCardMaxAttemptsRaw || ''),
+          bestHoleRoundsRaw: String(draft.bestHoleRoundsRaw || '2'),
+          pointsMode: draft.pointsMode === 'manual' ? 'manual' : 'percent',
+          pointsFirstRaw: String(draft.pointsFirstRaw || '100'),
+          pointsDecayRaw: String(draft.pointsDecayRaw || '8'),
+          pointsPodiumRaw: String(draft.pointsPodiumRaw || '3'),
+          pointsTableRaw: String(draft.pointsTableRaw || ''),
+          stablefordAttemptsByUser: String(draft.stablefordAttemptsByUser || '1'),
+        };
+      });
+      setCompetitionDrafts(nextDrafts);
       setChampEnabled(!!data.champEnabled);
+      setChampionshipMembershipIds(Array.isArray(data.championshipMembershipIds) ? data.championshipMembershipIds.map((x: any) => String(x || '')).filter(Boolean) : []);
       setChampTotalRaw(data.champTotalRaw || '');
       setChampSimpleRaw(data.champSimpleRaw || '');
       setChampDoubleRaw(data.champDoubleRaw || '');
@@ -674,8 +888,6 @@ export default function AdminCrearEventoPage() {
       setName('');
       setEventDate('');
       setEventEndDate('');
-      setRegistrationStart('');
-      setRegistrationEnd('');
       setOkMsg(t('adminEventsCreate.templateLoaded'));
       setErrorMsg(null);
     } catch {
@@ -755,6 +967,7 @@ export default function AdminCrearEventoPage() {
   const save = async () => {
     setErrorMsg(null);
     setOkMsg(null);
+    setShowSuccessToast(false);
     setShowValidation(true);
 
     if (!currentAssociationId) {
@@ -792,6 +1005,10 @@ export default function AdminCrearEventoPage() {
       setErrorMsg(t('adminEventsCreate.errors.registrationEndInvalid'));
       return;
     }
+    if (registrationStart && registrationEnd && registrationEnd < registrationStart) {
+      setErrorMsg(t('adminEventsCreate.errors.registrationEndInvalid'));
+      return;
+    }
 
     if (startMode === 'hoyo_intervalo') {
       const hole = Number.parseInt(startHoleRaw, 10);
@@ -803,7 +1020,7 @@ export default function AdminCrearEventoPage() {
     }
 
     let maxPlayers: number | null = null;
-    if (maxPlayersRaw.trim()) {
+    if (format !== 'stableford' && maxPlayersRaw.trim()) {
       const n = Number.parseInt(maxPlayersRaw, 10);
       if (!Number.isFinite(n) || n < 2 || n > 256) {
         setErrorMsg(t('adminEventsCreate.errors.maxPlayersInvalid'));
@@ -813,7 +1030,7 @@ export default function AdminCrearEventoPage() {
     }
 
     const config: any = {};
-    if (maxPlayers) config.maxPlayers = maxPlayers;
+    if (format !== 'stableford' && maxPlayers) config.maxPlayers = maxPlayers;
     if (eventEndDate) config.event_end_date = eventEndDate;
     config.teamCompetitionEnabled = !!teamCompetitionEnabled;
     if (teamCompetitionEnabled && teamBestPlayersRaw.trim()) {
@@ -839,70 +1056,97 @@ export default function AdminCrearEventoPage() {
         currency: String(row.currency || '').trim() || 'EUR',
       }))
       .filter((row) => row.category && Number.isFinite(row.price));
-    if (normalizedPrices.length) config.prices = normalizedPrices;
+    if (format !== 'stableford' && normalizedPrices.length) config.prices = normalizedPrices;
 
     let competitionMode: string | null = null;
+    let competitionsPayload: any[] = [];
+    let registrationStartValue = registrationStart;
+    let registrationEndValue = registrationEnd;
+    let courseIdValue = courseId;
+    let statusValue = status;
+
     if (format === 'stableford') {
       competitionMode = 'stableford';
-      const classicRounds = Number.parseInt(classicRoundsRaw, 10);
-      const bestCardRounds = Number.parseInt(bestCardRoundsRaw, 10);
-      const bestHoleRounds = Number.parseInt(bestHoleRoundsRaw, 10);
-      const weeklyMaxAttempts = weeklyMaxAttemptsRaw.trim()
-        ? Number.parseInt(weeklyMaxAttemptsRaw, 10)
-        : NaN;
-      if (stablefordMode === 'weekly' && weeklyAllowExtraAttempts && weeklyMaxAttemptsRaw.trim()) {
-        if (!Number.isFinite(weeklyMaxAttempts) || weeklyMaxAttempts < 1) {
-          setErrorMsg(t('adminEventsCreate.errors.weeklyMaxAttemptsInvalid'));
-          return;
-        }
+      const enabledCompetitions = COMPETITION_TYPES.filter((type) => competitionDrafts[type]?.enabled);
+      if (enabledCompetitions.length === 0) {
+        setErrorMsg(t('adminEventsCreate.errors.selectCompetition'));
+        return;
       }
 
-      config.stableford = {
-        mode: stablefordMode,
-        classicRounds: Number.isFinite(classicRounds) ? classicRounds : null,
-        bestCardRounds: Number.isFinite(bestCardRounds) ? bestCardRounds : null,
-        bestCardMaxAttempts: bestCardMaxAttemptsRaw.trim()
-          ? Number.parseInt(bestCardMaxAttemptsRaw, 10)
-          : null,
-        bestHoleRounds: Number.isFinite(bestHoleRounds) ? bestHoleRounds : null,
-        weekly: stablefordMode === 'weekly'
-          ? {
-              minAttempts: 1,
-              maxAttempts: Number.isFinite(weeklyMaxAttempts) && weeklyAllowExtraAttempts
-                ? weeklyMaxAttempts
-                : 1,
-              requireAdminApproval: weeklyAllowExtraAttempts && !Number.isFinite(weeklyMaxAttempts),
-              extraAttemptsByUser: {},
-            }
-          : null,
-        classicPoints: {
-          mode: pointsMode,
-          first: Number.parseInt(pointsFirstRaw, 10) || 0,
-          decayPercent: Number.parseFloat(pointsDecayRaw) || 0,
-          podiumCount: Number.parseInt(pointsPodiumRaw, 10) || 0,
-          table: pointsMode === 'manual' ? parseIntList(pointsTableRaw) : [],
-        },
-      };
+      competitionsPayload = enabledCompetitions.map((type) => {
+        const draft = competitionDrafts[type];
+        const normalizedPrices = (draft.priceRows || [])
+          .map((row) => ({
+            category: String(row.category || '').trim(),
+            price: Number.parseFloat(String(row.price || '')),
+            currency: String(row.currency || '').trim() || 'EUR',
+          }))
+          .filter((row) => row.category && Number.isFinite(row.price));
 
-      if (champEnabled) {
-        const total = Number.parseInt(champTotalRaw, 10);
-        const simple = Number.parseInt(champSimpleRaw, 10);
-        const double = Number.parseInt(champDoubleRaw, 10);
-        const bestSimple = Number.parseInt(champBestSimpleRaw, 10);
-        const bestDouble = Number.parseInt(champBestDoubleRaw, 10);
-
-        config.championship = {
-          enabled: true,
-          totalEvents: Number.isFinite(total) ? total : null,
-          simpleEvents: Number.isFinite(simple) ? simple : null,
-          doubleEvents: Number.isFinite(double) ? double : null,
-          bestSimpleCount: Number.isFinite(bestSimple) ? bestSimple : null,
-          bestDoubleCount: Number.isFinite(bestDouble) ? bestDouble : null,
-          categories: champCategories,
+        const classicRounds = Number.parseInt(draft.classicRoundsRaw, 10);
+        const bestCardRounds = Number.parseInt(draft.bestCardRoundsRaw, 10);
+        const bestHoleRounds = Number.parseInt(draft.bestHoleRoundsRaw, 10);
+        const bestCardMaxAttempts = draft.bestCardMaxAttemptsRaw.trim()
+          ? Number.parseInt(draft.bestCardMaxAttemptsRaw, 10)
+          : null;
+        return {
+          type,
+          name: buildCompetitionName(trimmedName, type, t),
+          registration_start: registrationStart || null,
+          registration_end: registrationEnd || null,
+          course_id: courseId.trim() || null,
+          status: draft.status || 'inscripcion',
+          status_mode: draft.statusMode === 'manual' ? 'manual' : 'auto',
+          max_players: draft.maxPlayersRaw.trim()
+            ? Number.parseInt(draft.maxPlayersRaw, 10)
+            : null,
+          config: {
+            prices: normalizedPrices,
+            stableford: {
+              mode: draft.stablefordMode,
+              pairsMode: draft.pairsPlayMode,
+              classicRounds: Number.isFinite(classicRounds) ? classicRounds : null,
+              bestCardRounds: Number.isFinite(bestCardRounds) ? bestCardRounds : null,
+              bestCardMaxAttempts: Number.isFinite(bestCardMaxAttempts) ? bestCardMaxAttempts : null,
+              bestHoleRounds: Number.isFinite(bestHoleRounds) ? bestHoleRounds : null,
+              attemptsByUser: {},
+              classicPoints: {
+                mode: draft.pointsMode,
+                first: Number.parseInt(draft.pointsFirstRaw, 10) || 0,
+                decayPercent: Number.parseFloat(draft.pointsDecayRaw) || 0,
+                podiumCount: Number.parseInt(draft.pointsPodiumRaw, 10) || 0,
+                table: draft.pointsMode === 'manual' ? parseIntList(draft.pointsTableRaw) : [],
+              },
+            },
+          },
         };
-      } else {
-        config.championship = { enabled: false };
+      });
+
+      const primaryType = enabledCompetitions.includes('individual')
+        ? 'individual'
+        : enabledCompetitions[0];
+      const primary = competitionsPayload.find((comp) => comp.type === primaryType) || competitionsPayload[0];
+
+      if (primary) {
+        statusValue = primary.status || 'inscripcion';
+
+        if (primary.max_players) config.maxPlayers = primary.max_players;
+        if (primary.config?.prices?.length) config.prices = primary.config.prices;
+        if (primary.config?.stableford) config.stableford = primary.config.stableford;
+        config.primaryCompetitionType = primaryType;
       }
+
+      if (champEnabled && championshipMembershipIds.length > 0) {
+        config.championshipMemberships = championshipMembershipIds.map((id) => {
+          const found = associationChampionships.find((item) => item.id === id);
+          return {
+            id,
+            name: found?.name || id,
+          };
+        });
+      }
+
+      config.championship = { enabled: false };
 
       if (champHubEnabled) {
         const normalizedHubEvents = champHubEvents
@@ -977,13 +1221,14 @@ export default function AdminCrearEventoPage() {
           association_id: currentAssociationId,
           name: trimmedName,
           event_date: eventDate,
-          registration_start: registrationStart || null,
-          registration_end: registrationEnd || null,
+          registration_start: registrationStartValue || null,
+          registration_end: registrationEndValue || null,
           competition_mode: competitionMode,
-          status: status.trim() || null,
+          status: statusValue.trim() || null,
           description: description.trim() || null,
-          course_id: courseId.trim() || null,
+          course_id: courseIdValue.trim() || null,
           has_handicap_ranking: false,
+          competitions: competitionsPayload,
           config,
         }),
       });
@@ -994,12 +1239,16 @@ export default function AdminCrearEventoPage() {
         return;
       }
 
+      setCreatedId(json?.id ? String(json.id) : null);
       setOkMsg(t('adminEventsCreate.created'));
+      setShowSuccessToast(true);
       setShowValidation(false);
       setName('');
       setStatus('inscripcion');
       setDescription('');
       setCourseId('');
+      setRegistrationStart('');
+      setRegistrationEnd('');
       setMaxPlayersRaw('');
       setEventDate('');
       setEventEndDate('');
@@ -1010,19 +1259,14 @@ export default function AdminCrearEventoPage() {
       setStartHoleRaw('1');
       setStartTimeRaw('');
       setStartIntervalRaw('');
-      setStablefordMode('classic');
-      setClassicRoundsRaw('1');
-      setBestCardRoundsRaw('2');
-      setBestCardMaxAttemptsRaw('');
-      setBestHoleRoundsRaw('2');
-      setWeeklyAllowExtraAttempts(false);
-      setWeeklyMaxAttemptsRaw('');
-      setPointsMode('percent');
-      setPointsFirstRaw('100');
-      setPointsDecayRaw('8');
-      setPointsPodiumRaw('3');
-      setPointsTableRaw('');
+      setCompetitionDrafts({
+        individual: buildDefaultCompetitionDraft('', 'individual', t),
+        parejas: buildDefaultCompetitionDraft('', 'parejas', t),
+        equipos: buildDefaultCompetitionDraft('', 'equipos', t),
+      });
       setChampEnabled(false);
+      setSelectedChampionshipId('');
+      setChampionshipMembershipIds([]);
       setChampTotalRaw('');
       setChampSimpleRaw('');
       setChampDoubleRaw('');
@@ -1314,7 +1558,7 @@ export default function AdminCrearEventoPage() {
                     value={courseId}
                     onChange={(e) => setCourseId(e.target.value)}
                     disabled={saving || !currentAssociationId || loadingCourses}
-                    className={selectClassName}
+                    className={withError(selectClassName, showValidation && validation.courseMissing)}
                   >
                     <option value="">{t('adminEventsCreate.courseNone')}</option>
                     {courses.map((c) => (
@@ -1326,114 +1570,119 @@ export default function AdminCrearEventoPage() {
                   {loadingCourses && <div className="text-[11px] text-gray-500">{t('adminEventsCreate.loadingCourses')}</div>}
                 </div>
 
-                <div className="space-y-1">
-                  <div className="text-xs text-gray-500">{t('adminEventsCreate.statusLabel')}</div>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value)}
-                    disabled={saving}
-                    className={selectClassName}
-                  >
-                    {STATUS_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {format !== 'stableford' && (
+                  <div className="space-y-1">
+                    <div className="text-xs text-gray-500">{t('adminEventsCreate.statusLabel')}</div>
+                    <select
+                      value={status}
+                      onChange={(e) => setStatus(e.target.value)}
+                      disabled={saving}
+                      className={selectClassName}
+                    >
+                      {STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
-              <div className="space-y-1">
-                <div className="text-xs text-gray-500">{t('adminEventsCreate.maxPlayersLabel')}</div>
-                <input
-                  inputMode="numeric"
-                  value={maxPlayersRaw}
-                  onChange={(e) => setMaxPlayersRaw(e.target.value)}
-                  disabled={saving}
-                  className={withError(inputClassName, showValidation && validation.maxPlayersInvalid)}
-                  placeholder={t('adminEventsCreate.maxPlayersPlaceholder')}
-                />
-                <div className="text-[11px] text-gray-500">{t('adminEventsCreate.maxPlayersHint')}</div>
-              </div>
+              {format !== 'stableford' && (
+                <>
+                  <div className="space-y-1">
+                    <div className="text-xs text-gray-500">{t('adminEventsCreate.maxPlayersLabel')}</div>
+                    <input
+                      inputMode="numeric"
+                      value={maxPlayersRaw}
+                      onChange={(e) => setMaxPlayersRaw(e.target.value)}
+                      disabled={saving}
+                      className={withError(inputClassName, showValidation && validation.maxPlayersInvalid)}
+                      placeholder={t('adminEventsCreate.maxPlayersPlaceholder')}
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <div className="text-xs text-gray-500">{t('adminEventsCreate.pricesLabel')}</div>
-                <div className="space-y-2">
-                  {priceRows.map((row, idx) => (
-                    <div key={`price-${idx}`} className="grid grid-cols-1 sm:grid-cols-[1.3fr_0.8fr_0.6fr_auto] gap-2">
-                      <select
-                        value={row.category}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setPriceRows((prev) => {
-                            const next = [...prev];
-                            next[idx] = { ...next[idx], category: value };
-                            return next;
-                          });
-                        }}
-                        disabled={saving}
-                        className={selectClassName}
-                      >
-                        {CATEGORY_OPTIONS.map((cat) => (
-                          <option key={cat} value={cat}>{getCategoryLabel(cat, t)}</option>
-                        ))}
-                      </select>
-                      <input
-                        inputMode="decimal"
-                        value={row.price}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setPriceRows((prev) => {
-                            const next = [...prev];
-                            next[idx] = { ...next[idx], price: value };
-                            return next;
-                          });
-                        }}
-                        disabled={saving}
-                        className={inputClassName}
-                        placeholder={t('adminEventsCreate.pricePlaceholder')}
-                      />
-                      <input
-                        value={row.currency}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setPriceRows((prev) => {
-                            const next = [...prev];
-                            next[idx] = { ...next[idx], currency: value };
-                            return next;
-                          });
-                        }}
-                        disabled={saving}
-                        className={inputClassName}
-                        placeholder={t('adminEventsCreate.currencyPlaceholder')}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPriceRows((prev) => prev.filter((_, i) => i !== idx));
-                        }}
-                        disabled={saving || priceRows.length <= 1}
-                        className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700 disabled:opacity-50"
-                      >
-                        {t('adminEventsCreate.removePrice')}
-                      </button>
+                  <div className="space-y-2">
+                    <div className="text-xs text-gray-500">{t('adminEventsCreate.pricesLabel')}</div>
+                    <div className="space-y-2">
+                      {priceRows.map((row, idx) => (
+                        <div key={`price-${idx}`} className="grid grid-cols-1 sm:grid-cols-[1.3fr_0.8fr_0.6fr_auto] gap-2">
+                          <select
+                            value={row.category}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setPriceRows((prev) => {
+                                const next = [...prev];
+                                next[idx] = { ...next[idx], category: value };
+                                return next;
+                              });
+                            }}
+                            disabled={saving}
+                            className={selectClassName}
+                          >
+                            {CATEGORY_OPTIONS.map((cat) => (
+                              <option key={cat} value={cat}>{getCategoryLabel(cat, t)}</option>
+                            ))}
+                          </select>
+                          <input
+                            inputMode="decimal"
+                            value={row.price}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setPriceRows((prev) => {
+                                const next = [...prev];
+                                next[idx] = { ...next[idx], price: value };
+                                return next;
+                              });
+                            }}
+                            disabled={saving}
+                            className={inputClassName}
+                            placeholder={t('adminEventsCreate.pricePlaceholder')}
+                          />
+                          <input
+                            value={row.currency}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setPriceRows((prev) => {
+                                const next = [...prev];
+                                next[idx] = { ...next[idx], currency: value };
+                                return next;
+                              });
+                            }}
+                            disabled={saving}
+                            className={inputClassName}
+                            placeholder={t('adminEventsCreate.currencyPlaceholder')}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPriceRows((prev) => prev.filter((_, i) => i !== idx));
+                            }}
+                            disabled={saving || priceRows.length <= 1}
+                            className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700 disabled:opacity-50"
+                          >
+                            {t('adminEventsCreate.removePrice')}
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPriceRows((prev) => ([
-                      ...prev,
-                      { category: CATEGORY_OPTIONS[0], price: '', currency: 'EUR' },
-                    ]));
-                  }}
-                  disabled={saving}
-                  className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700"
-                >
-                  {t('adminEventsCreate.addPrice')}
-                </button>
-              </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPriceRows((prev) => ([
+                          ...prev,
+                          { category: CATEGORY_OPTIONS[0], price: '', currency: 'EUR' },
+                        ]));
+                      }}
+                      disabled={saving}
+                      className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700"
+                    >
+                      {t('adminEventsCreate.addPrice')}
+                    </button>
+                  </div>
+                </>
+              )}
 
               <div className="space-y-1">
                 <div className="text-xs text-gray-500">{t('adminEventsCreate.descriptionLabel')}</div>
@@ -1448,178 +1697,352 @@ export default function AdminCrearEventoPage() {
               </div>
 
               {format === 'stableford' && (
-                <div className="w-full rounded-2xl border border-gray-200 bg-white/70 p-4 space-y-3">
-                  <div className="text-sm font-extrabold text-gray-900">{t('adminEventsCreate.stablefordTitle')}</div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <div className="text-xs text-gray-500">{t('adminEventsCreate.stablefordModeLabel')}</div>
-                      <select
-                        value={stablefordMode}
-                        onChange={(e) => setStablefordMode(e.target.value as StablefordMode)}
-                        disabled={saving}
-                        className={selectClassName}
-                      >
-                        <option value="classic">{t('adminEventsCreate.stablefordClassicLabel')}</option>
-                        <option value="best_card">{t('adminEventsCreate.stablefordBestCardLabel')}</option>
-                        <option value="best_hole">{t('adminEventsCreate.stablefordBestHoleLabel')}</option>
-                        <option value="weekly">{t('adminEventsCreate.stablefordWeeklyLabel')}</option>
-                      </select>
+                <div className="space-y-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+                  <div className="space-y-1">
+                    <div className="text-xs text-gray-500">{t('adminEventsCreate.modalityLabel')}</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {COMPETITION_TYPES.map((type) => {
+                        const checked = competitionDrafts[type]?.enabled;
+                        return (
+                          <label key={type} className="flex items-start gap-2 text-sm text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleCompetition(type)}
+                              disabled={saving}
+                              className="mt-0.5"
+                            />
+                            <span>{getCompetitionLabel(type, t)}</span>
+                          </label>
+                        );
+                      })}
                     </div>
-
-                    {stablefordMode === 'classic' && (
-                      <div className="space-y-1">
-                        <div className="text-xs text-gray-500">{t('adminEventsCreate.stablefordRoundsLabel')}</div>
-                        <input
-                          value={classicRoundsRaw}
-                          onChange={(e) => setClassicRoundsRaw(e.target.value)}
-                          disabled={saving}
-                          className={inputClassName}
-                          placeholder={t('adminEventsCreate.stablefordRoundsPlaceholder')}
-                        />
-                      </div>
+                    {showValidation && validation.competitionsMissing && (
+                      <div className="text-[11px] text-red-600">{t('adminEventsCreate.errors.selectCompetition')}</div>
                     )}
-
-                    {stablefordMode === 'best_card' && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <div className="text-xs text-gray-500">{t('adminEventsCreate.roundsCountLabel')}</div>
-                          <input
-                            value={bestCardRoundsRaw}
-                            onChange={(e) => setBestCardRoundsRaw(e.target.value)}
-                            disabled={saving}
-                            className={inputClassName}
-                            placeholder={t('adminEventsCreate.roundsMinPlaceholder')}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <div className="text-xs text-gray-500">{t('adminEventsCreate.bestCardMaxAttemptsLabel')}</div>
-                          <input
-                            value={bestCardMaxAttemptsRaw}
-                            onChange={(e) => setBestCardMaxAttemptsRaw(e.target.value)}
-                            disabled={saving}
-                            className={inputClassName}
-                            placeholder={t('adminEventsCreate.bestCardMaxAttemptsPlaceholder')}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {stablefordMode === 'best_hole' && (
-                      <div className="space-y-1">
-                        <div className="text-xs text-gray-500">{t('adminEventsCreate.roundsCountLabel')}</div>
-                        <input
-                          value={bestHoleRoundsRaw}
-                          onChange={(e) => setBestHoleRoundsRaw(e.target.value)}
-                          disabled={saving}
-                          className={inputClassName}
-                          placeholder={t('adminEventsCreate.roundsMinPlaceholder')}
-                        />
-                      </div>
-                    )}
-
-                    {stablefordMode === 'weekly' && (
-                      <div className="space-y-2 sm:col-span-2">
-                        <div className="text-xs text-gray-500">{t('adminEventsCreate.weeklyAttemptsTitle')}</div>
-                        <label className="flex items-center gap-2 text-sm text-gray-700">
-                          <input
-                            type="checkbox"
-                            checked={weeklyAllowExtraAttempts}
-                            onChange={(e) => setWeeklyAllowExtraAttempts(e.target.checked)}
-                            disabled={saving}
-                          />
-                          {t('adminEventsCreate.weeklyAllowExtraLabel')}
-                        </label>
-                        {weeklyAllowExtraAttempts && (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                              <div className="text-xs text-gray-500">{t('adminEventsCreate.weeklyMaxAttemptsLabel')}</div>
-                              <input
-                                value={weeklyMaxAttemptsRaw}
-                                onChange={(e) => setWeeklyMaxAttemptsRaw(e.target.value)}
-                                disabled={saving}
-                                className={inputClassName}
-                                placeholder={t('adminEventsCreate.weeklyMaxAttemptsPlaceholder')}
-                              />
-                            </div>
-                            <div className="text-[11px] text-gray-600 flex items-center">
-                              {t('adminEventsCreate.weeklyApprovalHint')}
-                            </div>
-                          </div>
-                        )}
-                        <div className="text-[11px] text-gray-600">{t('adminEventsCreate.weeklyMinHint')}</div>
-                      </div>
-                    )}
+                    <div className="text-[11px] text-gray-500">{t('adminEventsCreate.modalityHint')}</div>
                   </div>
 
-                  {stablefordMode === 'classic' && (
-                    <div className="rounded-xl border border-gray-200 bg-white/80 p-3 space-y-2">
-                      <div className="text-xs font-semibold text-gray-700">{t('adminEventsCreate.pointsTitle')}</div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsModeLabel')}</div>
-                          <select
-                            value={pointsMode}
-                            onChange={(e) => setPointsMode(e.target.value as PointsMode)}
+                  {COMPETITION_TYPES.filter((type) => competitionDrafts[type]?.enabled).map((type) => {
+                    const draft = competitionDrafts[type];
+                    if (!draft) return null;
+                    const statusValue = draft.statusMode === 'auto' ? 'auto' : (draft.status || 'inscripcion');
+                    return (
+                      <div key={type} className="space-y-4 rounded-2xl border border-amber-200 bg-white/70 p-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                          <div className="font-semibold text-sm text-amber-900">
+                            {getCompetitionLabel(type, t)}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => toggleCompetition(type)}
                             disabled={saving}
-                            className={selectClassName}
+                            className="px-3 py-1.5 rounded-xl text-[11px] bg-white border border-amber-200 text-amber-800"
                           >
-                            <option value="percent">{t('adminEventsCreate.pointsModePercent')}</option>
-                            <option value="manual">{t('adminEventsCreate.pointsModeManual')}</option>
-                          </select>
+                            {t('adminEventsCreate.removeCompetition')}
+                          </button>
                         </div>
 
-                        {pointsMode === 'percent' ? (
-                          <>
-                            <div className="space-y-1">
-                              <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsFirstLabel')}</div>
-                              <input
-                                value={pointsFirstRaw}
-                                onChange={(e) => setPointsFirstRaw(e.target.value)}
-                                disabled={saving}
-                                className={inputClassName}
-                                placeholder="100"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsDecayLabel')}</div>
-                              <input
-                                value={pointsDecayRaw}
-                                onChange={(e) => setPointsDecayRaw(e.target.value)}
-                                disabled={saving}
-                                className={inputClassName}
-                                placeholder="8"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsPodiumLabel')}</div>
-                              <input
-                                value={pointsPodiumRaw}
-                                onChange={(e) => setPointsPodiumRaw(e.target.value)}
-                                disabled={saving}
-                                className={inputClassName}
-                                placeholder="3"
-                              />
-                            </div>
-                          </>
-                        ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1 sm:col-span-2">
-                            <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsTableLabel')}</div>
-                            <input
-                              value={pointsTableRaw}
-                              onChange={(e) => setPointsTableRaw(e.target.value)}
+                            <div className="text-xs text-gray-500">{t('adminEventsCreate.statusLabel')}</div>
+                            <select
+                              value={statusValue}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                if (value === 'auto') {
+                                  updateCompetitionDraft(type, { statusMode: 'auto' });
+                                } else {
+                                  updateCompetitionDraft(type, { statusMode: 'manual', status: value });
+                                }
+                              }}
                               disabled={saving}
-                              className={inputClassName}
-                              placeholder={t('adminEventsCreate.pointsTablePlaceholder')}
-                            />
+                              className={selectClassName}
+                            >
+                              <option value="auto">{t('adminEventsCreate.statusAutoLabel')}</option>
+                              {STATUS_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="text-[11px] text-gray-500">{t('adminEventsCreate.statusAutoHint')}</div>
                           </div>
-                        )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-xs text-gray-500">{t('adminEventsCreate.maxPlayersLabel')}</div>
+                          <input
+                            inputMode="numeric"
+                            value={draft.maxPlayersRaw}
+                            onChange={(e) => updateCompetitionDraft(type, { maxPlayersRaw: e.target.value })}
+                            disabled={saving}
+                            className={withError(inputClassName, showValidation && validation.competitionMaxPlayersInvalid)}
+                            placeholder={t('adminEventsCreate.maxPlayersPlaceholder')}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-xs text-gray-500">{t('adminEventsCreate.pricesLabel')}</div>
+                          <div className="space-y-2">
+                            {draft.priceRows.map((row, idx) => (
+                              <div
+                                key={`${type}-price-${idx}`}
+                                className="grid grid-cols-1 sm:grid-cols-[1.3fr_0.8fr_0.6fr_auto] gap-2"
+                              >
+                                <select
+                                  value={row.category}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    updateCompetitionDraft(type, {
+                                      priceRows: draft.priceRows.map((entry, entryIdx) =>
+                                        entryIdx === idx ? { ...entry, category: value } : entry,
+                                      ),
+                                    });
+                                  }}
+                                  disabled={saving}
+                                  className={selectClassName}
+                                >
+                                  {CATEGORY_OPTIONS.map((cat) => (
+                                    <option key={cat} value={cat}>{getCategoryLabel(cat, t)}</option>
+                                  ))}
+                                </select>
+                                <input
+                                  inputMode="decimal"
+                                  value={row.price}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    updateCompetitionDraft(type, {
+                                      priceRows: draft.priceRows.map((entry, entryIdx) =>
+                                        entryIdx === idx ? { ...entry, price: value } : entry,
+                                      ),
+                                    });
+                                  }}
+                                  disabled={saving}
+                                  className={inputClassName}
+                                  placeholder={t('adminEventsCreate.pricePlaceholder')}
+                                />
+                                <input
+                                  value={row.currency}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    updateCompetitionDraft(type, {
+                                      priceRows: draft.priceRows.map((entry, entryIdx) =>
+                                        entryIdx === idx ? { ...entry, currency: value } : entry,
+                                      ),
+                                    });
+                                  }}
+                                  disabled={saving}
+                                  className={inputClassName}
+                                  placeholder={t('adminEventsCreate.currencyPlaceholder')}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    updateCompetitionDraft(type, {
+                                      priceRows: draft.priceRows.filter((_, entryIdx) => entryIdx !== idx),
+                                    });
+                                  }}
+                                  disabled={saving || draft.priceRows.length <= 1}
+                                  className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700 disabled:opacity-50"
+                                >
+                                  {t('adminEventsCreate.removePrice')}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateCompetitionDraft(type, {
+                                priceRows: [
+                                  ...draft.priceRows,
+                                  { category: CATEGORY_OPTIONS[0], price: '', currency: 'EUR' },
+                                ],
+                              });
+                            }}
+                            disabled={saving}
+                            className="px-3 py-2 rounded-xl text-xs bg-white border border-gray-200 text-gray-700"
+                          >
+                            {t('adminEventsCreate.addPrice')}
+                          </button>
+                        </div>
+
+                        <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
+                          <div className="font-semibold text-sm text-amber-900">{t('adminEventsCreate.stablefordModeLabel')}</div>
+                          {type === 'parejas' && (
+                            <div className="space-y-1">
+                              <div className="text-xs text-gray-500">{t('adminEventsCreate.pairModeLabel')}</div>
+                              <select
+                                value={draft.pairsPlayMode}
+                                onChange={(e) => updateCompetitionDraft(type, { pairsPlayMode: e.target.value as PairPlayMode })}
+                                disabled={saving}
+                                className={selectClassName}
+                              >
+                                {PAIR_PLAY_MODE_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {t(option.label)}
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="text-[11px] text-gray-500">{t('adminEventsCreate.pairModeHint')}</div>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {STABLEFORD_MODE_OPTIONS.map((mode) => (
+                              <label key={mode.value} className="flex items-start gap-2 text-sm text-gray-700">
+                                <input
+                                  type="radio"
+                                  name={`stablefordMode-${type}`}
+                                  value={mode.value}
+                                  checked={draft.stablefordMode === mode.value}
+                                  onChange={(e) => {
+                                    const nextMode = e.target.value as StablefordMode;
+                                    if (nextMode === 'best_hole') {
+                                      const rounds = Number.parseInt(draft.bestHoleRoundsRaw, 10);
+                                      updateCompetitionDraft(type, {
+                                        stablefordMode: nextMode,
+                                        bestHoleRoundsRaw: Number.isFinite(rounds) && rounds >= 2
+                                          ? draft.bestHoleRoundsRaw
+                                          : '2',
+                                      });
+                                      return;
+                                    }
+                                    updateCompetitionDraft(type, { stablefordMode: nextMode });
+                                  }}
+                                  disabled={saving}
+                                  className="mt-0.5"
+                                />
+                                <span>{t(mode.label)}</span>
+                              </label>
+                            ))}
+                          </div>
+
+                          {draft.stablefordMode === 'classic' && (
+                            <div className="space-y-2">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <div className="text-xs text-gray-500">{t('adminEventsCreate.stablefordRoundsLabel')}</div>
+                                  <input
+                                    inputMode="numeric"
+                                    value={draft.classicRoundsRaw}
+                                    onChange={(e) => updateCompetitionDraft(type, { classicRoundsRaw: e.target.value })}
+                                    disabled={saving}
+                                    className={withError(inputClassName, showValidation && validation.stablefordClassicRoundsInvalid)}
+                                    placeholder={t('adminEventsCreate.stablefordRoundsPlaceholder')}
+                                  />
+                                </div>
+                              </div>
+                              <div className="rounded-xl border border-gray-200 bg-white/80 p-3 space-y-2">
+                                <div className="text-xs font-semibold text-gray-700">{t('adminEventsCreate.pointsTitle')}</div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsModeLabel')}</div>
+                                    <select
+                                      value={draft.pointsMode}
+                                      onChange={(e) => updateCompetitionDraft(type, { pointsMode: e.target.value as PointsMode })}
+                                      disabled={saving}
+                                      className={selectClassName}
+                                    >
+                                      <option value="percent">{t('adminEventsCreate.pointsModePercent')}</option>
+                                      <option value="manual">{t('adminEventsCreate.pointsModeManual')}</option>
+                                    </select>
+                                  </div>
+
+                                  {draft.pointsMode === 'percent' ? (
+                                    <>
+                                      <div className="space-y-1">
+                                        <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsFirstLabel')}</div>
+                                        <input
+                                          value={draft.pointsFirstRaw}
+                                          onChange={(e) => updateCompetitionDraft(type, { pointsFirstRaw: e.target.value })}
+                                          disabled={saving}
+                                          className={withError(inputClassName, showValidation && validation.stablefordPointsInvalid)}
+                                          placeholder="100"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsDecayLabel')}</div>
+                                        <input
+                                          value={draft.pointsDecayRaw}
+                                          onChange={(e) => updateCompetitionDraft(type, { pointsDecayRaw: e.target.value })}
+                                          disabled={saving}
+                                          className={withError(inputClassName, showValidation && validation.stablefordPointsInvalid)}
+                                          placeholder="8"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsPodiumLabel')}</div>
+                                        <input
+                                          value={draft.pointsPodiumRaw}
+                                          onChange={(e) => updateCompetitionDraft(type, { pointsPodiumRaw: e.target.value })}
+                                          disabled={saving}
+                                          className={withError(inputClassName, showValidation && validation.stablefordPointsInvalid)}
+                                          placeholder="3"
+                                        />
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div className="space-y-1 sm:col-span-2">
+                                      <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsTableLabel')}</div>
+                                      <input
+                                        value={draft.pointsTableRaw}
+                                        onChange={(e) => updateCompetitionDraft(type, { pointsTableRaw: e.target.value })}
+                                        disabled={saving}
+                                        className={withError(inputClassName, showValidation && validation.stablefordPointsInvalid)}
+                                        placeholder={t('adminEventsCreate.pointsTablePlaceholder')}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-gray-600">
+                                  {t('adminEventsCreate.pointsTieHint').replace('{count}', draft.pointsPodiumRaw || '3')}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {draft.stablefordMode === 'best_card' && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <div className="text-xs text-gray-500">{t('adminEventsCreate.roundsCountLabel')}</div>
+                                <input
+                                  value={draft.bestCardRoundsRaw}
+                                  onChange={(e) => updateCompetitionDraft(type, { bestCardRoundsRaw: e.target.value })}
+                                  disabled={saving}
+                                  className={withError(inputClassName, showValidation && validation.stablefordBestCardInvalid)}
+                                  placeholder={t('adminEventsCreate.roundsMinPlaceholder')}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-xs text-gray-500">{t('adminEventsCreate.bestCardMaxAttemptsLabel')}</div>
+                                <input
+                                  value={draft.bestCardMaxAttemptsRaw}
+                                  onChange={(e) => updateCompetitionDraft(type, { bestCardMaxAttemptsRaw: e.target.value })}
+                                  disabled={saving}
+                                  className={withError(inputClassName, showValidation && validation.stablefordBestCardInvalid)}
+                                  placeholder={t('adminEventsCreate.bestCardMaxAttemptsPlaceholder')}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {draft.stablefordMode === 'best_hole' && (
+                            <div className="space-y-1">
+                              <div className="text-xs text-gray-500">{t('adminEventsCreate.roundsCountLabel')}</div>
+                              <input
+                                value={draft.bestHoleRoundsRaw}
+                                onChange={(e) => updateCompetitionDraft(type, { bestHoleRoundsRaw: e.target.value })}
+                                disabled={saving}
+                                className={withError(inputClassName, showValidation && validation.stablefordBestHoleInvalid)}
+                                  placeholder="2"
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-[11px] text-gray-600">
-                        {t('adminEventsCreate.pointsTieHint').replace('{count}', pointsPodiumRaw || '3')}
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })}
 
                   <div className="rounded-xl border border-gray-200 bg-white/80 p-3 space-y-2">
                     <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
@@ -1634,262 +2057,58 @@ export default function AdminCrearEventoPage() {
 
                     {champEnabled && (
                       <div className="space-y-3">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div className="space-y-1">
-                            <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipTotal')}</div>
-                            <input
-                              value={champTotalRaw}
-                              onChange={(e) => setChampTotalRaw(e.target.value)}
-                              disabled={saving}
-                              className={inputClassName}
-                              placeholder="12"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipSimple')}</div>
-                            <input
-                              value={champSimpleRaw}
-                              onChange={(e) => setChampSimpleRaw(e.target.value)}
-                              disabled={saving}
-                              className={inputClassName}
-                              placeholder="8"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipDouble')}</div>
-                            <input
-                              value={champDoubleRaw}
-                              onChange={(e) => setChampDoubleRaw(e.target.value)}
-                              disabled={saving}
-                              className={inputClassName}
-                              placeholder="4"
-                            />
-                          </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                          <select
+                            value={selectedChampionshipId}
+                            onChange={(e) => setSelectedChampionshipId(e.target.value)}
+                            disabled={saving || associationChampionships.length === 0}
+                            className={selectClassName}
+                          >
+                            <option value="">{t('adminEventsCreate.championshipHubSelect')}</option>
+                            {associationChampionships
+                              .filter((row) => !championshipMembershipIds.includes(row.id))
+                              .map((row) => (
+                                <option key={row.id} value={row.id}>{row.name}</option>
+                              ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!selectedChampionshipId) return;
+                              setChampionshipMembershipIds((prev) => (
+                                prev.includes(selectedChampionshipId) ? prev : [...prev, selectedChampionshipId]
+                              ));
+                              setSelectedChampionshipId('');
+                            }}
+                            className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700"
+                            disabled={saving || !selectedChampionshipId}
+                          >
+                            {t('adminEventsCreate.championshipHubAdd')}
+                          </button>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipBestSimple')}</div>
-                            <input
-                              value={champBestSimpleRaw}
-                              onChange={(e) => setChampBestSimpleRaw(e.target.value)}
-                              disabled={saving}
-                              className={inputClassName}
-                              placeholder="6"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipBestDouble')}</div>
-                            <input
-                              value={champBestDoubleRaw}
-                              onChange={(e) => setChampBestDoubleRaw(e.target.value)}
-                              disabled={saving}
-                              className={inputClassName}
-                              placeholder="3"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipCategories')}</div>
-                          <div className="flex flex-wrap gap-2">
-                            {CATEGORY_OPTIONS.map((cat) => (
-                              <label key={cat} className="flex items-center gap-2 text-xs text-gray-700">
-                                <input
-                                  type="checkbox"
-                                  checked={champCategories.includes(cat)}
-                                  onChange={(e) => {
-                                    setChampCategories((prev) => {
-                                      if (e.target.checked) return Array.from(new Set([...prev, cat]));
-                                      return prev.filter((c) => c !== cat);
-                                    });
-                                  }}
-                                  disabled={saving}
-                                />
-                                {getCategoryLabel(cat, t)}
-
-                            <div className="rounded-xl border border-gray-200 bg-white/80 p-3 space-y-2">
-                              <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
-                                <input
-                                  type="checkbox"
-                                  checked={champHubEnabled}
-                                  onChange={(e) => setChampHubEnabled(e.target.checked)}
-                                  disabled={saving}
-                                />
-                                {t('adminEventsCreate.championshipHubLabel')}
-                              </label>
-
-                              {champHubEnabled && (
-                                <div className="space-y-3">
-                                  <div className="space-y-2">
-                                    <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipCategories')}</div>
-                                    <div className="flex flex-wrap gap-2">
-                                      {CATEGORY_OPTIONS.map((cat) => (
-                                        <label key={cat} className="flex items-center gap-2 text-xs text-gray-700">
-                                          <input
-                                            type="checkbox"
-                                            checked={champHubCategories.includes(cat)}
-                                            onChange={(e) => {
-                                              setChampHubCategories((prev) => {
-                                                if (e.target.checked) return Array.from(new Set([...prev, cat]));
-                                                return prev.filter((c) => c !== cat);
-                                              });
-                                            }}
-                                            disabled={saving}
-                                          />
-                                          {getCategoryLabel(cat, t)}
-                                        </label>
-                                      ))}
-                                    </div>
-                                  </div>
-
-                                  <div className="space-y-2">
-                                    {champHubEvents.length === 0 ? (
-                                      <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipHubEmpty')}</div>
-                                    ) : (
-                                      <div className="space-y-2">
-                                        {champHubEvents.map((row, idx) => (
-                                          <div key={`hub-${idx}`} className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
-                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                              <div className="space-y-1">
-                                                <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipHubEvent')}</div>
-                                                <select
-                                                  value={row.eventId}
-                                                  onChange={(e) => {
-                                                    const next = e.target.value;
-                                                    setChampHubEvents((prev) => prev.map((r, i) => i === idx ? ({ ...r, eventId: next }) : r));
-                                                  }}
-                                                  disabled={saving}
-                                                  className={selectClassName}
-                                                >
-                                                  <option value="">{t('adminEventsCreate.championshipHubSelect')}</option>
-                                                  {associationEvents.map((ev) => (
-                                                    <option key={ev.id} value={ev.id}>{ev.name}</option>
-                                                  ))}
-                                                </select>
-                                              </div>
-                                              <div className="space-y-1">
-                                                <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipHubType')}</div>
-                                                <select
-                                                  value={row.kind}
-                                                  onChange={(e) => {
-                                                    const next = e.target.value === 'doble' ? 'doble' : 'simple';
-                                                    setChampHubEvents((prev) => prev.map((r, i) => i === idx ? ({ ...r, kind: next }) : r));
-                                                  }}
-                                                  disabled={saving}
-                                                  className={selectClassName}
-                                                >
-                                                  <option value="simple">{t('adminEventsCreate.championshipHubTypeSimple')}</option>
-                                                  <option value="doble">{t('adminEventsCreate.championshipHubTypeDouble')}</option>
-                                                </select>
-                                              </div>
-                                              <div className="space-y-1">
-                                                <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipHubPointsMode')}</div>
-                                                <select
-                                                  value={row.pointsMode}
-                                                  onChange={(e) => {
-                                                    const next = e.target.value === 'manual' ? 'manual' : 'percent';
-                                                    setChampHubEvents((prev) => prev.map((r, i) => i === idx ? ({ ...r, pointsMode: next }) : r));
-                                                  }}
-                                                  disabled={saving}
-                                                  className={selectClassName}
-                                                >
-                                                  <option value="percent">{t('adminEventsCreate.pointsModePercent')}</option>
-                                                  <option value="manual">{t('adminEventsCreate.pointsModeManual')}</option>
-                                                </select>
-                                              </div>
-                                            </div>
-
-                                            {row.pointsMode === 'manual' ? (
-                                              <div className="space-y-1">
-                                                <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsTableLabel')}</div>
-                                                <input
-                                                  value={row.tableRaw}
-                                                  onChange={(e) => {
-                                                    const next = e.target.value;
-                                                    setChampHubEvents((prev) => prev.map((r, i) => i === idx ? ({ ...r, tableRaw: next }) : r));
-                                                  }}
-                                                  disabled={saving}
-                                                  className={inputClassName}
-                                                  placeholder={t('adminEventsCreate.pointsTablePlaceholder')}
-                                                />
-                                              </div>
-                                            ) : (
-                                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                                <div className="space-y-1">
-                                                  <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsFirstLabel')}</div>
-                                                  <input
-                                                    value={row.firstRaw}
-                                                    onChange={(e) => {
-                                                      const next = e.target.value;
-                                                      setChampHubEvents((prev) => prev.map((r, i) => i === idx ? ({ ...r, firstRaw: next }) : r));
-                                                    }}
-                                                    disabled={saving}
-                                                    className={inputClassName}
-                                                    placeholder="100"
-                                                  />
-                                                </div>
-                                                <div className="space-y-1">
-                                                  <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsDecayLabel')}</div>
-                                                  <input
-                                                    value={row.decayRaw}
-                                                    onChange={(e) => {
-                                                      const next = e.target.value;
-                                                      setChampHubEvents((prev) => prev.map((r, i) => i === idx ? ({ ...r, decayRaw: next }) : r));
-                                                    }}
-                                                    disabled={saving}
-                                                    className={inputClassName}
-                                                    placeholder="8"
-                                                  />
-                                                </div>
-                                                <div className="space-y-1">
-                                                  <div className="text-xs text-gray-500">{t('adminEventsCreate.pointsPodiumLabel')}</div>
-                                                  <input
-                                                    value={row.podiumRaw}
-                                                    onChange={(e) => {
-                                                      const next = e.target.value;
-                                                      setChampHubEvents((prev) => prev.map((r, i) => i === idx ? ({ ...r, podiumRaw: next }) : r));
-                                                    }}
-                                                    disabled={saving}
-                                                    className={inputClassName}
-                                                    placeholder="3"
-                                                  />
-                                                </div>
-                                              </div>
-                                            )}
-
-                                            <div className="flex items-center justify-end">
-                                              <button
-                                                type="button"
-                                                onClick={() => setChampHubEvents((prev) => prev.filter((_, i) => i !== idx))}
-                                                className="text-xs text-red-600"
-                                                disabled={saving}
-                                              >
-                                                {t('adminEventsCreate.remove')}
-                                              </button>
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-
-                                    <button
-                                      type="button"
-                                      onClick={() => setChampHubEvents((prev) => [...prev, buildDefaultChampHubEvent()])}
-                                      className="inline-flex items-center gap-2 text-xs text-blue-700"
-                                      disabled={saving}
-                                    >
-                                      <PlusCircle className="h-4 w-4" />
-                                      {t('adminEventsCreate.championshipHubAdd')}
-                                    </button>
-                                  </div>
+                        {championshipMembershipIds.length === 0 ? (
+                          <div className="text-xs text-gray-500">{t('adminEventsCreate.championshipHubEmpty')}</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {championshipMembershipIds.map((id) => {
+                              const championship = associationChampionships.find((item) => item.id === id);
+                              return (
+                                <div key={`membership-${id}`} className="rounded-xl border border-gray-200 bg-white px-3 py-2 flex items-center justify-between gap-2">
+                                  <div className="text-sm text-gray-800 truncate">{championship?.name || id}</div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setChampionshipMembershipIds((prev) => prev.filter((item) => item !== id))}
+                                    className="text-xs text-red-600"
+                                    disabled={saving}
+                                  >
+                                    {t('adminEventsCreate.remove')}
+                                  </button>
                                 </div>
-                              )}
-                            </div>
-                              </label>
-                            ))}
+                              );
+                            })}
                           </div>
-                        </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1985,9 +2204,6 @@ export default function AdminCrearEventoPage() {
                         )}
                       </div>
 
-                      <div className="text-[11px] text-gray-600 break-all">
-                        {t('adminEventsCreate.matchConfigHint')}
-                      </div>
                     </>
                   ) : (
                     <>
@@ -2124,6 +2340,48 @@ export default function AdminCrearEventoPage() {
           </section>
         </main>
       </div>
+
+      {showSuccessToast && okMsg && (
+        <div className="fixed bottom-4 right-4 z-[70] w-[min(92vw,380px)] rounded-2xl border border-emerald-200 bg-white/95 backdrop-blur-md shadow-[0_16px_40px_-20px_rgba(16,185,129,0.65)]">
+          <div className="p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600 mt-0.5" />
+                <div>
+                  <div className="text-sm font-semibold text-emerald-800">{okMsg}</div>
+                  <div className="text-xs text-emerald-700/90">El torneo se ha guardado correctamente.</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSuccessToast(false)}
+                className="rounded-lg p-1 text-emerald-700/70 hover:text-emerald-900 hover:bg-emerald-50"
+                aria-label="Cerrar aviso"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {createdId ? (
+                <Link
+                  href={`/events/${createdId}`}
+                  className="inline-flex items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700"
+                >
+                  Ver torneo
+                </Link>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setShowSuccessToast(false)}
+                className="inline-flex items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold border border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, DoorOpen, Save } from 'lucide-react';
+import { ArrowLeft, DoorOpen, Save, Trash2 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/auth-context';
 import { supabase } from '@/lib/supabase';
@@ -10,6 +10,7 @@ import { useLanguage } from '@/context/language-context';
 
 interface PlayerProfile {
   id: string;
+  management_id?: number | null;
   email?: string | null;
   first_name?: string | null;
   last_name?: string | null;
@@ -26,6 +27,11 @@ interface PlayerProfile {
   is_admin?: boolean | null;
 }
 
+type AssociationLite = {
+  id: string;
+  name: string;
+};
+
 export default function AdminPlayerProfilePage() {
   const { user, profile, loading, isAdmin } = useAuth();
   const { t } = useLanguage();
@@ -35,7 +41,11 @@ export default function AdminPlayerProfilePage() {
 
   const [form, setForm] = useState<PlayerProfile | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSuccess, setDeleteSuccess] = useState(false);
+  const [associations, setAssociations] = useState<AssociationLite[]>([]);
 
   useEffect(() => {
     document.body.classList.add('premium-admin-bg');
@@ -71,7 +81,25 @@ export default function AdminPlayerProfilePage() {
     };
   }, [playerId, t]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadAssociations = async () => {
+      const res = await fetch('/api/associations');
+      const json = await res.json().catch(() => ({}));
+      if (!active) return;
+      const rows = (json?.data as AssociationLite[]) || [];
+      setAssociations(rows);
+    };
+
+    void loadAssociations();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const hasForm = !!form;
+  const isCreatorTarget = String(form?.role || '').trim().toLowerCase() === 'creador';
 
   const payload = useMemo(() => {
     if (!form) return null;
@@ -95,6 +123,10 @@ export default function AdminPlayerProfilePage() {
 
   const onSave = async () => {
     if (!form || !payload) return;
+    if (isCreatorTarget) {
+      setStatus('La cuenta creador no se puede modificar desde esta pantalla.');
+      return;
+    }
     setSaving(true);
     setStatus(null);
 
@@ -119,6 +151,41 @@ export default function AdminPlayerProfilePage() {
       setSaving(false);
     }
   };
+
+  const onDeletePlayer = async () => {
+    if (!form) return;
+    if (isCreatorTarget) {
+      setDeleteError('La cuenta creador no se puede eliminar desde esta pantalla.');
+      return;
+    }
+    setDeleting(true);
+    setDeleteError(null);
+    setDeleteSuccess(false);
+
+    try {
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes?.data?.session?.access_token;
+      const res = await fetch(`/api/admin/players/${playerId}`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDeleteError(String(json?.error || t('common.error')));
+        return;
+      }
+
+      setDeleteSuccess(true);
+      router.push('/admin/jugadores');
+    } catch (e: any) {
+      setDeleteError(e?.message || t('common.error'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const adminLabel = t('profilePage.fields.admin');
+  const safeAdminLabel = adminLabel === 'profilePage.fields.admin' ? 'Administrador' : adminLabel;
 
   if (loading) {
     return (
@@ -174,7 +241,12 @@ export default function AdminPlayerProfilePage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
                 <div className="premium-field">
                   <span>ID:</span>
-                  <input className="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-gray-50" value={form.id} disabled readOnly />
+                  <input
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-gray-50"
+                    value={form.management_id ?? ''}
+                    disabled
+                    readOnly
+                  />
                 </div>
                 <div className="premium-field">
                   <span>{t('profilePage.fields.email')}:</span>
@@ -222,14 +294,21 @@ export default function AdminPlayerProfilePage() {
                 </div>
                 <div className="premium-field">
                   <span>{t('profilePage.fields.association')}:</span>
-                  <input className="w-full border border-gray-300 rounded px-3 py-2 text-sm" value={form.association_id || ''} onChange={(e) => setForm({ ...form, association_id: e.target.value })} />
+                  <select
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    value={form.association_id || ''}
+                    onChange={(e) => setForm({ ...form, association_id: e.target.value || null })}
+                  >
+                    <option value="">—</option>
+                    {associations.map((assoc) => (
+                      <option key={assoc.id} value={assoc.id}>
+                        {assoc.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="premium-field">
-                  <span>{t('profilePage.fields.defaultAssociation')}:</span>
-                  <input className="w-full border border-gray-300 rounded px-3 py-2 text-sm" value={form.default_association_id || ''} onChange={(e) => setForm({ ...form, default_association_id: e.target.value })} />
-                </div>
-                <div className="premium-field">
-                  <span>{t('profilePage.fields.admin')}:</span>
+                  <span>{safeAdminLabel}:</span>
                   <label className="flex items-center gap-2 text-sm font-semibold text-gray-800">
                     <input
                       type="checkbox"
@@ -246,7 +325,7 @@ export default function AdminPlayerProfilePage() {
               <button
                 type="button"
                 onClick={onSave}
-                disabled={!hasForm || saving}
+                disabled={!hasForm || saving || isCreatorTarget}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold bg-emerald-600 text-white disabled:opacity-50"
               >
                 <Save className="h-4 w-4" />
@@ -254,10 +333,86 @@ export default function AdminPlayerProfilePage() {
               </button>
               {status && <div className="text-xs text-gray-700">{status}</div>}
             </div>
+
+            {hasForm && !isCreatorTarget && (
+              <div className="mt-6 border-t border-gray-200 pt-4">
+                <DeletePlayerTripleConfirm
+                  onConfirm={onDeletePlayer}
+                  loading={deleting}
+                  error={deleteError}
+                  success={deleteSuccess}
+                />
+              </div>
+            )}
           </section>
         </main>
       </div>
     </>
+  );
+}
+
+function DeletePlayerTripleConfirm({
+  onConfirm,
+  loading,
+  error,
+  success,
+}: {
+  onConfirm: () => void;
+  loading: boolean;
+  error: string | null;
+  success: boolean;
+}) {
+  const { t } = useLanguage();
+  const [step, setStep] = useState(1);
+  const [input, setInput] = useState('');
+
+  return (
+    <div>
+      <div className="font-semibold mb-2 text-red-700">{t('adminPlayers.deletePlayer')}</div>
+      {step === 1 && (
+        <div>
+          <div className="mb-2">{t('adminPlayers.deletePlayerStep1')}</div>
+          <button className="bg-red-600 text-white px-4 py-2 rounded font-semibold" onClick={() => setStep(2)}>
+            {t('profilePage.deleteContinue')}
+          </button>
+        </div>
+      )}
+      {step === 2 && (
+        <div>
+          <div className="mb-2">
+            {t('profilePage.deleteStep2')} <b>{t('profilePage.deleteConfirmWord')}</b>
+          </div>
+          <input
+            className="border rounded px-2 py-1 mb-2"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={t('profilePage.deleteConfirmWord')}
+          />
+          <button
+            className="bg-red-600 text-white px-4 py-2 rounded font-semibold"
+            disabled={input !== t('profilePage.deleteConfirmWord')}
+            onClick={() => setStep(3)}
+          >
+            {t('profilePage.confirm')}
+          </button>
+        </div>
+      )}
+      {step === 3 && (
+        <div>
+          <div className="mb-2">{t('adminPlayers.deletePlayerStep3')}</div>
+          <button
+            className="inline-flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded font-semibold"
+            disabled={loading}
+            onClick={onConfirm}
+          >
+            <Trash2 className="h-4 w-4" />
+            {loading ? t('profilePage.deleting') : t('adminPlayers.deletePlayerAction')}
+          </button>
+        </div>
+      )}
+      {error && <div className="text-sm text-red-600 mt-2">{error}</div>}
+      {success && <div className="text-sm text-green-600 mt-2">{t('adminPlayers.deletePlayerSuccess')}</div>}
+    </div>
   );
 }
 

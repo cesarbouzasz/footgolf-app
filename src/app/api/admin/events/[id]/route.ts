@@ -799,16 +799,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       return NextResponse.json({ ok: false, error: 'Invalid registration_end (YYYY-MM-DD)' }, { status: 200 });
     }
 
-    const courseIdRaw = typeof body?.course_id === 'string' ? body.course_id.trim() : '';
-    if (!courseIdRaw) {
-      return NextResponse.json({ ok: false, error: 'Missing course_id' }, { status: 200 });
-    }
-    if (!isUuid(courseIdRaw)) {
-      return NextResponse.json({ ok: false, error: 'Invalid course_id' }, { status: 200 });
-    }
-
     const competitionMode = normalizeMode(body?.competition_mode);
     const incomingConfig = isPlainObject(body?.config) ? body.config : {};
+    const isChampionshipEvent = !!(incomingConfig as any)?.isChampionship || !!(existingConfig as any)?.isChampionship;
+
+    const courseIdRaw = typeof body?.course_id === 'string' ? body.course_id.trim() : '';
+    if (!courseIdRaw && !isChampionshipEvent) {
+      return NextResponse.json({ ok: false, error: 'Missing course_id' }, { status: 200 });
+    }
+    if (courseIdRaw && !isUuid(courseIdRaw)) {
+      return NextResponse.json({ ok: false, error: 'Invalid course_id' }, { status: 200 });
+    }
 
     const hasIncomingLocked = Object.prototype.hasOwnProperty.call(incomingConfig, 'finalClassificationLocked');
     const incomingLocked = hasIncomingLocked ? (incomingConfig as any).finalClassificationLocked : undefined;

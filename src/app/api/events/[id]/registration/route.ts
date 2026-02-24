@@ -54,6 +54,13 @@ function isBetween(value: Date, start?: Date | null, end?: Date | null) {
   return value >= start && value <= end;
 }
 
+function isRegistrationOpen(value: Date, start?: Date | null, end?: Date | null) {
+  if (!start && !end) return true;
+  if (start && !end) return value >= start;
+  if (!start && end) return value <= end;
+  return isBetween(value, start, end);
+}
+
 function toDate(value?: string | null) {
   if (!value) return null;
   const d = new Date(value);
@@ -246,7 +253,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const now = new Date();
     const regStart = toDate(eventRow.registration_start);
     const regEnd = toDate(eventRow.registration_end);
-    if (regStart && regEnd && !isBetween(now, regStart, regEnd)) {
+    if (!isRegistrationOpen(now, regStart, regEnd)) {
       return NextResponse.json({ ok: false, error: 'Inscripción cerrada.' }, { status: 403 });
     }
 
@@ -381,6 +388,15 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
 
     const eventRow = await getEventById(eventId);
     if (!eventRow) return NextResponse.json({ ok: false, error: 'Event not found' }, { status: 404 });
+
+    if (!actingAsAdmin) {
+      const now = new Date();
+      const regStart = toDate(eventRow.registration_start);
+      const regEnd = toDate(eventRow.registration_end);
+      if (!isRegistrationOpen(now, regStart, regEnd)) {
+        return NextResponse.json({ ok: false, error: 'Inscripción cerrada.' }, { status: 403 });
+      }
+    }
 
     const currentConfig = eventRow.config || {};
     const currentRegistered = normalizeIdArray(eventRow.registered_player_ids);

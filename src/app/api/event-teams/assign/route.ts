@@ -111,8 +111,9 @@ export async function POST(req: NextRequest) {
 
     if (playerError || !player) return NextResponse.json({ ok: false, error: 'Player not found' }, { status: 404 });
 
-    if (String((player as any).role || '') !== 'usuario') {
-      return NextResponse.json({ ok: false, error: 'Only role=usuario can be assigned' }, { status: 400 });
+    const playerRole = String((player as any).role || '').trim().toLowerCase();
+    if (!new Set(['usuario', 'jugador', 'admin']).has(playerRole)) {
+      return NextResponse.json({ ok: false, error: 'Only roles usuario, jugador or admin can be assigned' }, { status: 400 });
     }
 
     if (String((player as any).association_id || '') !== associationId) {

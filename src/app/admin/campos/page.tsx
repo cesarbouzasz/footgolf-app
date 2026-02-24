@@ -63,22 +63,22 @@ export default function AdminCamposMenuPage() {
           <section className="flex min-h-[360px] flex-col justify-evenly">
             <Link
               href="/admin/campos/crear"
-              className="premium-admin-tile flex flex-col items-center justify-center gap-3 text-center text-white border-4 border-gold-600/90 shadow-premium-sm hover:shadow-gold-lg hover:-translate-y-[2px] transition-transform bg-gradient-to-br from-cyan-500 to-cyan-700 hover:from-cyan-600 hover:to-cyan-800"
+              className="premium-admin-tile premium-admin-neon-pulse premium-card group flex flex-col items-center justify-center gap-3 text-center border-2 border-gold-600/80 shadow-[0_0_24px_rgba(34,211,238,0.45),0_0_42px_rgba(37,99,235,0.35)] hover:shadow-[0_0_34px_rgba(103,232,249,0.55),0_0_62px_rgba(59,130,246,0.45)] hover:-translate-y-[3px] transition-all duration-200 bg-gradient-to-br from-cyan-300 via-sky-500 to-blue-700"
             >
-              <span className="h-11 w-11 rounded-2xl bg-white/20 border border-white/25 flex items-center justify-center">
-                <PlusCircle className="h-5 w-5 text-white" />
+              <span className="h-11 w-11 rounded-2xl bg-black/30 border border-white/45 backdrop-blur-[1px] flex items-center justify-center z-[1]">
+                <PlusCircle className="h-5 w-5 -translate-y-px text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]" />
               </span>
-                <span className="text-base font-extrabold">{t('adminCoursesMenu.create')}</span>
+                <span className="z-[1] inline-flex w-full items-center justify-center text-center text-base font-extrabold leading-none text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.95)]">{t('adminCoursesMenu.create')}</span>
             </Link>
 
             <Link
               href="/admin/campos/editar"
-              className="premium-admin-tile flex flex-col items-center justify-center gap-3 text-center text-white border-4 border-gold-600/90 shadow-premium-sm hover:shadow-gold-lg hover:-translate-y-[2px] transition-transform bg-gradient-to-br from-violet-500 to-violet-700 hover:from-violet-600 hover:to-violet-800"
+              className="premium-admin-tile premium-admin-neon-pulse premium-card group flex flex-col items-center justify-center gap-3 text-center border-2 border-gold-600/80 shadow-[0_0_24px_rgba(167,139,250,0.45),0_0_42px_rgba(126,34,206,0.35)] hover:shadow-[0_0_34px_rgba(196,181,253,0.55),0_0_62px_rgba(147,51,234,0.45)] hover:-translate-y-[3px] transition-all duration-200 bg-gradient-to-br from-indigo-300 via-violet-500 to-purple-700"
             >
-              <span className="h-11 w-11 rounded-2xl bg-white/20 border border-white/25 flex items-center justify-center">
-                <Pencil className="h-5 w-5 text-white" />
+              <span className="h-11 w-11 rounded-2xl bg-black/30 border border-white/45 backdrop-blur-[1px] flex items-center justify-center z-[1]">
+                <Pencil className="h-5 w-5 -translate-y-px text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]" />
               </span>
-                <span className="text-base font-extrabold">{t('adminCoursesMenu.edit')}</span>
+                <span className="z-[1] inline-flex w-full items-center justify-center text-center text-base font-extrabold leading-none text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.95)]">{t('adminCoursesMenu.edit')}</span>
             </Link>
           </section>
         </main>

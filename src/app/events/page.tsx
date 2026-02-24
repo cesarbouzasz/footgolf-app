@@ -29,6 +29,9 @@ type EventMeta = EventRow & {
   isUpcoming: boolean;
 };
 
+type PendingAction = 'subscribe' | 'unsubscribe';
+type Feedback = { type: 'success' | 'error'; text: string };
+
 const formatLabel = (format: string | null | undefined, t: (key: string) => string) => {
   if (!format) return t('events.general');
   const value = format.toLowerCase();
@@ -49,11 +52,28 @@ const LOCALE_BY_LANGUAGE: Record<string, string> = {
   TR: 'tr-TR',
 };
 
-const toDate = (value?: string | null) => (value ? new Date(value) : null);
+const toDate = (value?: string | null) => {
+  if (!value) return null;
+  const normalized = String(value).trim();
+  if (!normalized) return null;
+  return new Date(`${normalized}T00:00:00`);
+};
+
+const normalizeIdArray = (value: any): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value.map((x) => String(x || '').trim()).filter(Boolean);
+};
 
 const isBetween = (value: Date, start?: Date | null, end?: Date | null) => {
   if (!start || !end) return false;
   return value >= start && value <= end;
+};
+
+const isRegistrationOpenAt = (value: Date, start?: Date | null, end?: Date | null) => {
+  if (!start && !end) return true;
+  if (start && !end) return value >= start;
+  if (!start && end) return value <= end;
+  return isBetween(value, start, end);
 };
 
 const isSameDay = (value: Date, target: Date) =>
@@ -63,12 +83,12 @@ const withEventMeta = (event: EventRow, now: Date): EventMeta => {
   const eventDate = toDate(event.event_date);
   const regStart = toDate(event.registration_start);
   const regEnd = toDate(event.registration_end);
-  const registrationOpen = regStart && regEnd ? isBetween(now, regStart, regEnd) : false;
-  const status = event.status?.toLowerCase() ?? '';
-  const inPlay = status === 'en_juego' || status === 'in_progress' || (eventDate ? isSameDay(now, eventDate) : false);
-  const finished = status === 'finalizado' || status === 'finished' || (eventDate ? now > eventDate : false);
+  const registrationOpen = isRegistrationOpenAt(now, regStart, regEnd);
+  const status = (event.status || '').trim().toLowerCase();
+  const inPlay = ['en_juego', 'in_progress', 'started', 'playing', 'live'].includes(status);
+  const finished = ['finalizado', 'finished', 'cerrado', 'closed'].includes(status);
   const isMatchPlay = (event.competition_mode || '').toLowerCase().includes('match') || (event.competition_mode || '').toLowerCase().includes('mp');
-  const isUpcoming = eventDate ? eventDate > now : false;
+  const isUpcoming = !finished && !inPlay;
 
   return {
     ...event,
@@ -87,25 +107,27 @@ export default function EventsPage() {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [busyByEventId, setBusyByEventId] = useState<Record<string, boolean>>({});
+  const [pendingByEventId, setPendingByEventId] = useState<Record<string, PendingAction | null>>({});
+  const [feedbackByEventId, setFeedbackByEventId] = useState<Record<string, Feedback | null>>({});
   const locale = LOCALE_BY_LANGUAGE[language] || 'es-ES';
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       setLoading(true);
-      let query = supabase
+      const { data } = await supabase
         .from('events')
         .select('id, name, status, competition_mode, registration_start, registration_end, event_date, course_id, config, registered_player_ids')
         .order('event_date', { ascending: true });
 
-      const { data } = await query;
       if (active) {
         setEvents((data as EventRow[]) || []);
         setLoading(false);
       }
     };
 
-    load();
+    void load();
     return () => {
       active = false;
     };
@@ -150,11 +172,77 @@ export default function EventsPage() {
     }
   };
 
+  const patchRegistrationState = (eventId: string, nextRegistered: string[], nextWaitlist: string[]) => {
+    setEvents((prev) => prev.map((event) => {
+      if (event.id !== eventId) return event;
+      return {
+        ...event,
+        registered_player_ids: nextRegistered,
+        config: {
+          ...(event.config || {}),
+          waitlist_player_ids: nextWaitlist,
+        },
+      };
+    }));
+  };
+
+  const setBusy = (eventId: string, value: boolean) => {
+    setBusyByEventId((prev) => ({ ...prev, [eventId]: value }));
+  };
+
+  const setPending = (eventId: string, value: PendingAction | null) => {
+    setPendingByEventId((prev) => ({ ...prev, [eventId]: value }));
+  };
+
+  const setFeedback = (eventId: string, feedback: Feedback | null) => {
+    setFeedbackByEventId((prev) => ({ ...prev, [eventId]: feedback }));
+  };
+
+  const confirmAction = async (event: EventMeta, action: PendingAction) => {
+    if (!user?.id) return;
+
+    setBusy(event.id, true);
+    setFeedback(event.id, null);
+    try {
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes?.data?.session?.access_token;
+      const method = action === 'subscribe' ? 'POST' : 'DELETE';
+
+      const res = await fetch(`/api/events/${encodeURIComponent(event.id)}/registration`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({}),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        setFeedback(event.id, {
+          type: 'error',
+          text: String(json?.error || (action === 'subscribe' ? t('events.errorRegistering') : t('events.errorCanceling'))),
+        });
+        return;
+      }
+
+      const nextRegistered = normalizeIdArray(json?.registered_player_ids);
+      const nextWaitlist = normalizeIdArray(json?.waitlist_player_ids);
+      patchRegistrationState(event.id, nextRegistered, nextWaitlist);
+      setFeedback(event.id, {
+        type: 'success',
+        text: String(json?.message || t('events.registrationUpdated')),
+      });
+      setPending(event.id, null);
+    } finally {
+      setBusy(event.id, false);
+    }
+  };
+
   return (
     <div className="relative min-h-screen px-4 py-6 sm:px-6" style={{ backgroundImage: 'linear-gradient(rgba(10,16,28,0.6), rgba(10,16,28,0.6)), url(/aereo.jpg)', backgroundSize: 'cover', backgroundPosition: 'center' }}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.18),transparent_55%),radial-gradient(circle_at_80%_60%,rgba(250,204,21,0.14),transparent_60%)]" />
       <header className="relative z-10 max-w-3xl mx-auto mb-4 flex items-center justify-between text-white">
-        <Link href="/dashboard" className="premium-back-btn" aria-label="Atras">
+        <Link href="/dashboard" className="premium-back-btn" aria-label={t('common.back')}>
           <ArrowLeft className="h-4 w-4" />
           <DoorOpen className="h-4 w-4" />
         </Link>
@@ -175,38 +263,107 @@ export default function EventsPage() {
             <div className="space-y-3">
               {topUpcoming.map((event) => {
                 const { day, month } = formatDayMonth(event.event_date);
+                const waitlistIds = normalizeIdArray((event.config as any)?.waitlist_player_ids);
+                const registeredIds = normalizeIdArray(event.registered_player_ids);
+                const isRegistered = !!user?.id && registeredIds.includes(user.id);
+                const isWaitlist = !!user?.id && waitlistIds.includes(user.id);
+                const isBusy = !!busyByEventId[event.id];
+                const canSelfCancel = event.registrationOpen && (isRegistered || isWaitlist);
+                const pending = pendingByEventId[event.id];
+                const feedback = feedbackByEventId[event.id];
+
                 return (
-                  <Link
-                    key={event.id}
-                    href={`/events/${event.id}`}
-                    className="flex items-center gap-4 rounded-2xl border border-gray-200/80 bg-white/95 p-3 shadow-sm"
-                  >
-                    <div className="w-12 shrink-0 text-center">
-                      <div className="text-sm font-semibold text-black">{day}</div>
-                      <div className="mt-1 rounded-md bg-sky-200 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-black">
-                        {month}
-                      </div>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-gray-900 truncate">
-                        {event.name}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {formatLabel(event.competition_mode, t)}
-                      </div>
-                    </div>
-                    <div className="text-right text-[11px] text-gray-500">
-                      {event.registrationOpen ? (
-                        <div className="font-semibold text-emerald-700">{t('events.registerCta')}</div>
-                      ) : null}
-                      {user?.id && Array.isArray((event.config as any)?.waitlist_player_ids) &&
-                      (event.config as any).waitlist_player_ids.includes(user.id) ? (
-                        <div className="mt-1 inline-flex rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 font-semibold text-amber-800">
-                          {t('events.waitlist')}
+                  <div key={event.id} className="rounded-2xl border border-gray-200/80 bg-white/95 p-3 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <Link href={`/events/${event.id}`} className="flex min-w-0 flex-1 items-center gap-4">
+                        <div className="w-12 shrink-0 text-center">
+                          <div className="text-sm font-semibold text-black">{day}</div>
+                          <div className="mt-1 rounded-md bg-sky-200 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-black">
+                            {month}
+                          </div>
                         </div>
-                      ) : null}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold text-gray-900 truncate">{event.name}</div>
+                          <div className="text-xs text-gray-500">{formatLabel(event.competition_mode, t)}</div>
+                        </div>
+                      </Link>
+
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        {isWaitlist ? (
+                          <div className="inline-flex rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                            {t('events.waitlist')}
+                          </div>
+                        ) : null}
+                        {isRegistered ? (
+                          <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                            {t('events.registered')}
+                          </div>
+                        ) : null}
+
+                        {canSelfCancel ? (
+                          <button
+                            type="button"
+                            onClick={() => setPending(event.id, pending === 'unsubscribe' ? null : 'unsubscribe')}
+                            disabled={isBusy}
+                            className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[11px] font-semibold text-rose-700 disabled:opacity-60"
+                          >
+                            {isBusy ? t('common.loading') : t('events.unregisterCta')}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setPending(event.id, pending === 'subscribe' ? null : 'subscribe')}
+                            disabled={isBusy || !user?.id || !event.registrationOpen || isRegistered || isWaitlist}
+                            className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700 disabled:opacity-60"
+                          >
+                            {isBusy
+                              ? t('common.loading')
+                              : event.registrationOpen
+                                ? t('events.registerCta')
+                                : t('events.registrationClosed')}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </Link>
+
+                    {pending ? (
+                      <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] text-slate-700">
+                          {pending === 'subscribe' ? t('events.registerConfirm') : t('events.unregisterConfirm')}
+                        </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void confirmAction(event, pending)}
+                            disabled={isBusy}
+                            className="rounded-full border border-sky-300 bg-sky-50 px-3 py-1 text-[11px] font-semibold text-sky-700 disabled:opacity-60"
+                          >
+                            {t('common.confirm')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPending(event.id, null)}
+                            disabled={isBusy}
+                            className="rounded-full border border-gray-300 bg-white px-3 py-1 text-[11px] font-semibold text-gray-700 disabled:opacity-60"
+                          >
+                            {t('common.cancel')}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {feedback ? (
+                      <div
+                        className={
+                          feedback.type === 'success'
+                            ? 'mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-700'
+                            : 'mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700'
+                        }
+                      >
+                        {feedback.text}
+                      </div>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>
@@ -246,12 +403,8 @@ export default function EventsPage() {
                       </div>
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-gray-900 truncate">
-                        {event.name}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {formatLabel(event.competition_mode, t)}
-                      </div>
+                      <div className="text-sm font-semibold text-gray-900 truncate">{event.name}</div>
+                      <div className="text-xs text-gray-500">{formatLabel(event.competition_mode, t)}</div>
                     </div>
                   </Link>
                 );

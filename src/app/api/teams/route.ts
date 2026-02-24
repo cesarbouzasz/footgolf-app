@@ -170,6 +170,67 @@ export async function POST(req: NextRequest) {
   }
 }
 
+export async function PATCH(req: NextRequest) {
+  try {
+    const user = await getAuthedUser(req);
+    if (!user) return NextResponse.json({ ok: false, error: 'Not authed' }, { status: 401 });
+
+    const { profile, isAdmin, role, associationAdminId } = await getAdminProfile(user.id);
+    if (!isAdmin) return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+
+    const body = await req.json().catch(() => ({}));
+    const teamId = String(body?.team_id || '').trim();
+    const name = String(body?.name || '').trim();
+    const maxPlayersRaw = Number(body?.max_players);
+    const maxPlayers = Number.isFinite(maxPlayersRaw) ? Math.floor(maxPlayersRaw) : NaN;
+
+    if (!teamId) return NextResponse.json({ ok: false, error: 'Missing team_id' }, { status: 400 });
+    if (!name) return NextResponse.json({ ok: false, error: 'Missing name' }, { status: 400 });
+    if (!Number.isFinite(maxPlayers) || maxPlayers < 1 || maxPlayers > 50) {
+      return NextResponse.json({ ok: false, error: 'max_players must be between 1 and 50' }, { status: 400 });
+    }
+
+    const { data: teamRow, error: teamError } = await supabaseAdmin
+      .from('teams')
+      .select('id, association_id, name')
+      .eq('id', teamId)
+      .single();
+
+    if (teamError || !teamRow) return NextResponse.json({ ok: false, error: 'Team not found' }, { status: 404 });
+
+    const associationId = String((teamRow as any).association_id || '');
+    const currentName = String((teamRow as any).name || '');
+
+    if (role !== 'creador') {
+      const allowed = allowedAssociationIdsFor(profile, associationAdminId);
+      if (allowed.length > 0 && !allowed.includes(associationId)) {
+        return NextResponse.json({ ok: false, error: 'Not allowed for this association' }, { status: 403 });
+      }
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from('teams')
+      .update({ name, max_players: maxPlayers })
+      .eq('id', teamId);
+
+    if (updateError) return NextResponse.json({ ok: false, error: updateError.message }, { status: 200 });
+
+    if (currentName && currentName !== name) {
+      const { error: playersError } = await supabaseAdmin
+        .from('profiles')
+        .update({ team: name })
+        .eq('association_id', associationId)
+        .eq('team', currentName);
+
+      if (playersError) return NextResponse.json({ ok: false, error: playersError.message }, { status: 200 });
+    }
+
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message || 'Server error' }, { status: 200 });
+  }
+}
+
 export async function DELETE(req: NextRequest) {
   try {
     const user = await getAuthedUser(req);
