@@ -54,11 +54,17 @@ export default function DashboardPage() {
   };
 
   return (
-    <div
-      className="min-h-screen bg-cover bg-center"
-      style={{ backgroundImage: "url('/aereo.jpg')" }}
-    >
-      <div className="min-h-screen bg-gradient-to-b from-black/70 via-black/40 to-black/80">
+    <div className="min-h-screen relative">
+      <div
+        className="pointer-events-none fixed inset-0 z-0"
+        style={{
+          backgroundImage: "url('/aereo.jpg')",
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+        }}
+      />
+      <div className="min-h-screen relative z-10 bg-gradient-to-b from-black/70 via-black/40 to-black/80">
         <div className="lux-shell min-h-screen">
           <div className="pointer-events-none absolute inset-0 -z-10">
             <div className="absolute -left-20 top-16 h-64 w-64 rounded-full bg-amber-300/15 blur-3xl" />

@@ -155,10 +155,16 @@ export default function LoginPage() {
   };
 
   return (
-    <div
-      className="min-h-screen bg-cover bg-center"
-      style={{ backgroundImage: "url('/aereo.jpg')" }}
-    >
+    <div className="min-h-screen relative">
+      <div
+        className="pointer-events-none fixed inset-0 z-0"
+        style={{
+          backgroundImage: "url('/aereo.jpg')",
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+        }}
+      />
       {turnstileEnabled && showTurnstile ? (
         <Script
           src="https://challenges.cloudflare.com/turnstile/v0/api.js"
@@ -166,7 +172,7 @@ export default function LoginPage() {
           onLoad={() => setTurnstileLoaded(true)}
         />
       ) : null}
-      <div className="min-h-screen bg-gradient-to-b from-black/55 via-black/30 to-black/65">
+      <div className="min-h-screen relative z-10 bg-gradient-to-b from-black/55 via-black/30 to-black/65">
         <div className="mx-auto flex min-h-screen w-full max-w-lg flex-col items-stretch justify-start px-6 pb-8 pt-2 text-white">
           <div className="mb-6 flex flex-col items-center text-center">
             <img

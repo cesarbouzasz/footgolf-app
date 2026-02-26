@@ -15,6 +15,7 @@ interface EventRow {
   name: string;
   status: string | null;
   competition_mode: string | null;
+  description: string | null;
   registration_start: string | null;
   registration_end: string | null;
   event_date: string | null;
@@ -106,9 +107,31 @@ const formatStartMode = (mode: string | null | undefined, t: (key: string) => st
   return t('events.startModeUnknown');
 };
 
+const formatEventStatus = (status: string | null | undefined, t: (key: string) => string) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (!value) return t('events.pendingStatus');
+  if (value === 'inscripcion') return t('events.statusOpen');
+  if (value === 'en_juego') return t('events.statusInGame');
+  if (value === 'cerrado') return t('events.statusClosed');
+  return String(status || '').trim() || t('events.pendingStatus');
+};
+
+const statusBadgeClass = (status: string | null | undefined) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (value === 'inscripcion') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (value === 'en_juego') return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (value === 'cerrado') return 'border-slate-300 bg-slate-100 text-slate-700';
+  return 'border-gray-200 bg-gray-100 text-gray-700';
+};
+
 function isMatchPlay(mode?: string | null) {
   const v = String(mode || '').toLowerCase();
   return v.includes('match');
+}
+
+function isStableford(mode?: string | null) {
+  const v = String(mode || '').toLowerCase();
+  return v.includes('stable');
 }
 
 function normalizeRounds(raw: any, roundCount: number, fallbackTotal?: number | null) {
@@ -345,6 +368,7 @@ export default function EventDetailPage() {
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [expandedRound, setExpandedRound] = useState(0);
   const [sortMode, setSortMode] = useState<ClassificationSort | null>(null);
+  const [courseName, setCourseName] = useState<string | null>(null);
   const [profileNameById, setProfileNameById] = useState<Record<string, string>>({});
   const [profileCategoryById, setProfileCategoryById] = useState<Record<string, string | null>>({});
 
@@ -437,9 +461,21 @@ export default function EventDetailPage() {
       setLoading(true);
       const { data: eventData } = await supabase
         .from('events')
-        .select('id, name, status, competition_mode, registration_start, registration_end, event_date, course_id, config, registered_player_ids, has_handicap_ranking')
+        .select('id, name, status, competition_mode, description, registration_start, registration_end, event_date, course_id, config, registered_player_ids, has_handicap_ranking')
         .eq('id', eventId)
         .single();
+
+      let resolvedCourseName: string | null = null;
+      const courseId = String((eventData as EventRow | null)?.course_id || '').trim();
+      if (courseId) {
+        const { data: courseData } = await supabase
+          .from('courses')
+          .select('name')
+          .eq('id', courseId)
+          .single();
+        const name = String((courseData as { name?: string } | null)?.name || '').trim();
+        resolvedCourseName = name || null;
+      }
 
       const ids = (eventData as EventRow | null)?.registered_player_ids ?? [];
       const config = (eventData as EventRow | null)?.config || {};
@@ -515,6 +551,7 @@ export default function EventDetailPage() {
 
       if (active) {
         setEvent((eventData as EventRow) || null);
+        setCourseName(resolvedCourseName);
         setRegistrations(regData);
         const priceConfig = (eventData as EventRow | null)?.config?.prices ?? [];
         setSelectedCategory(priceConfig?.[0]?.category || '');
@@ -546,6 +583,7 @@ export default function EventDetailPage() {
   }, [event]);
 
   const isMatchPlayEvent = useMemo(() => isMatchPlay(event?.competition_mode), [event]);
+  const isStablefordEvent = useMemo(() => isStableford(event?.competition_mode), [event]);
   const isEventClosed = useMemo(() => {
     const status = String(event?.status || '').trim().toLowerCase();
     return ['closed', 'finished', 'finalizado', 'cerrado'].includes(status);
@@ -1493,9 +1531,66 @@ export default function EventDetailPage() {
     );
   }
 
+  const registrationCount = registrations.filter((row) => !row.is_waitlist).length;
+  const detailWaitlistCount = registrations.filter((row) => !!row.is_waitlist).length;
+  const eventEndDate = String((event.config as any)?.event_end_date || '').trim() || null;
+  const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleDateString() : t('events.registrationDateUndefined'));
+  const registrationDatesLabel = (() => {
+    const start = event.registration_start ? formatDate(event.registration_start) : '';
+    const end = event.registration_end ? formatDate(event.registration_end) : '';
+    if (start && end) return `${start} - ${end}`;
+    if (start) return t('events.registrationFrom').replace('{date}', start);
+    if (end) return t('events.registrationTo').replace('{date}', end);
+    return t('events.registrationDateUndefined');
+  })();
+  const gameDatesLabel = event.event_date
+    ? (eventEndDate ? `${formatDate(event.event_date)} - ${formatDate(eventEndDate)}` : formatDate(event.event_date))
+    : t('events.noDate');
+  const modeLabel = formatLabel(event.competition_mode);
+  const descriptionLabel = String(event.description || '').trim() || t('events.noDescription');
+  const enrolledLabel = detailWaitlistCount > 0
+    ? t('events.enrolledWithWaitlist').replace('{count}', String(registrationCount)).replace('{waitlist}', String(detailWaitlistCount))
+    : String(registrationCount);
+  const normalizedEventStatus = String(event.status || '').trim().toLowerCase();
+  const eventStatusLabel = formatEventStatus(event.status, t);
+  const isClosedMatchPlay = isMatchPlayEvent && isEventClosed;
+  const detailBackgroundImage = isMatchPlayEvent
+    ? '/matchplay.jpg'
+    : isStablefordEvent
+      ? '/vista-stable.jpg'
+      : null;
+  const hasDetailImageBackground = !!detailBackgroundImage;
+  const detailBackgroundStyle = hasDetailImageBackground
+    ? {
+        backgroundImage: isMatchPlayEvent
+          ? `linear-gradient(rgba(10,16,28,0.62), rgba(10,16,28,0.62)), url(${detailBackgroundImage})`
+          : `linear-gradient(rgba(10,16,28,0.46), rgba(10,16,28,0.46)), url(${detailBackgroundImage})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat' as const,
+      }
+    : undefined;
+  const summaryCardClass = isClosedMatchPlay
+    ? 'rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-200 via-amber-100 to-yellow-100 p-4 sm:p-5 shadow-[0_12px_36px_rgba(251,191,36,0.35)] space-y-3'
+    : 'bg-white/90 rounded-3xl border border-white/70 p-4 sm:p-5 shadow-[0_20px_60px_rgba(15,23,42,0.12)] space-y-3';
+  const summaryInnerClass = isClosedMatchPlay
+    ? 'rounded-2xl border border-amber-200/80 bg-white/75 p-3 sm:p-4'
+    : 'rounded-2xl border border-gray-200 bg-white/80 p-3 sm:p-4';
+
   return (
-    <div className="min-h-screen px-4 py-6 sm:px-6 pb-24">
-      <header className="max-w-3xl mx-auto mb-4 flex items-center justify-between">
+    <div className="min-h-screen relative px-4 py-6 sm:px-6 pb-24">
+      {hasDetailImageBackground ? (
+        <div className="pointer-events-none fixed inset-0 z-0" style={detailBackgroundStyle} />
+      ) : null}
+      {hasDetailImageBackground ? (
+        <div className={`pointer-events-none fixed inset-0 z-0 ${
+          isMatchPlayEvent
+            ? 'bg-[radial-gradient(circle_at_top,rgba(251,191,36,0.16),transparent_55%),radial-gradient(circle_at_85%_20%,rgba(245,158,11,0.14),transparent_52%)]'
+            : 'bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.16),transparent_55%),radial-gradient(circle_at_85%_20%,rgba(45,212,191,0.14),transparent_52%)]'
+        }`} />
+      ) : null}
+
+      <header className={`max-w-3xl mx-auto mb-4 flex items-center justify-between relative z-10`}>
         <Link href="/events" className="premium-back-btn" aria-label={t('common.back')}>
           <ArrowLeft className="h-4 w-4" />
           <DoorOpen className="h-4 w-4" />
@@ -1504,20 +1599,18 @@ export default function EventDetailPage() {
         <div className="w-12" />
       </header>
 
-      <main className="max-w-3xl mx-auto space-y-4">
-        <div className="bg-white/90 rounded-3xl border border-white/70 p-4 sm:p-5 shadow-[0_20px_60px_rgba(15,23,42,0.12)] space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-lg font-semibold text-gray-900">{event.name}</div>
+      <main className="max-w-3xl mx-auto space-y-4 relative z-10">
+        <div className={summaryCardClass}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-lg font-semibold text-gray-900 break-words">{event.name}</div>
               <div className="text-xs text-gray-500">
                 {event.event_date ? new Date(event.event_date).toLocaleDateString() : t('events.noDate')}
               </div>
             </div>
-            {String(event.status || '').trim().toLowerCase() !== 'inscripcion' && (
-              <div className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
-                {event.status || t('events.pendingStatus')}
-              </div>
-            )}
+            <div className={`text-xs px-2 py-1 rounded-full border shrink-0 ${statusBadgeClass(event.status)}`}>
+              {eventStatusLabel}
+            </div>
           </div>
           {!isMatchPlayEvent && classificationPhase === 'live' && (
             <div className="flex justify-end">
@@ -1530,6 +1623,35 @@ export default function EventDetailPage() {
               </button>
             </div>
           )}
+
+          <div className={summaryInnerClass}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-500">{t('events.detailFieldCourse')}</div>
+                <div className="text-sm font-medium leading-snug text-gray-900 break-words">{courseName || t('events.noCourse')}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-500">{t('events.detailFieldRegistrationDates')}</div>
+                <div className="text-sm font-medium leading-snug text-gray-900 break-words">{registrationDatesLabel}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-500">{t('events.detailFieldGameDates')}</div>
+                <div className="text-sm font-medium leading-snug text-gray-900 break-words">{gameDatesLabel}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-500">{t('events.detailFieldEnrolled')}</div>
+                <div className="text-sm font-medium leading-snug text-gray-900 break-words">{enrolledLabel}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-500">{t('events.detailFieldMode')}</div>
+                <div className="text-sm font-medium leading-snug text-gray-900 break-words">{modeLabel}</div>
+              </div>
+              <div className="sm:col-span-2">
+                <div className="text-[11px] uppercase tracking-wide text-gray-500">{t('events.detailFieldDescription')}</div>
+                <div className="text-sm font-medium leading-snug text-gray-900 whitespace-pre-wrap break-words">{descriptionLabel}</div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {!isMatchPlayEvent && classificationPhase !== 'live' ? classificationSection : null}

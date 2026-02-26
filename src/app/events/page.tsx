@@ -41,6 +41,34 @@ const formatLabel = (format: string | null | undefined, t: (key: string) => stri
   return format;
 };
 
+const formatEventStatus = (status: string | null | undefined, t: (key: string) => string) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (!value) return t('events.pendingStatus');
+  if (value === 'inscripcion') return t('events.statusOpen');
+  if (value === 'en_juego') return t('events.statusInGame');
+  if (value === 'cerrado') return t('events.statusClosed');
+  return String(status || '').trim() || t('events.pendingStatus');
+};
+
+const statusBadgeClass = (status: string | null | undefined) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (value === 'inscripcion') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (value === 'en_juego') return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (value === 'cerrado') return 'border-slate-300 bg-slate-100 text-slate-700';
+  return 'border-gray-200 bg-gray-100 text-gray-700';
+};
+
+const upcomingCardClass = (isMatchPlay: boolean) => {
+  if (isMatchPlay) {
+    return 'rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-200/90 via-amber-100/85 to-yellow-100/85 p-3 shadow-[0_12px_36px_rgba(251,191,36,0.3)]';
+  }
+  return 'rounded-2xl border border-gray-200/80 bg-white/90 p-3 shadow-sm';
+};
+
+const finishedCardClass = () => {
+  return 'flex items-center gap-4 rounded-2xl border border-pink-300/90 bg-pink-100/95 p-3 shadow-sm';
+};
+
 const LOCALE_BY_LANGUAGE: Record<string, string> = {
   ES: 'es-ES',
   EN: 'en-US',
@@ -239,8 +267,17 @@ export default function EventsPage() {
   };
 
   return (
-    <div className="relative min-h-screen px-4 py-6 sm:px-6" style={{ backgroundImage: 'linear-gradient(rgba(10,16,28,0.6), rgba(10,16,28,0.6)), url(/aereo.jpg)', backgroundSize: 'cover', backgroundPosition: 'center' }}>
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.18),transparent_55%),radial-gradient(circle_at_80%_60%,rgba(250,204,21,0.14),transparent_60%)]" />
+    <div className="relative min-h-screen px-4 py-6 sm:px-6">
+      <div
+        className="pointer-events-none fixed inset-0 z-0"
+        style={{
+          backgroundImage: 'linear-gradient(rgba(10,16,28,0.6), rgba(10,16,28,0.6)), url(/aereo.jpg)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+        }}
+      />
+      <div className="pointer-events-none fixed inset-0 z-0 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.18),transparent_55%),radial-gradient(circle_at_80%_60%,rgba(250,204,21,0.14),transparent_60%)]" />
       <header className="relative z-10 max-w-3xl mx-auto mb-4 flex items-center justify-between text-white">
         <Link href="/dashboard" className="premium-back-btn" aria-label={t('common.back')}>
           <ArrowLeft className="h-4 w-4" />
@@ -253,7 +290,7 @@ export default function EventsPage() {
       <main className="relative z-10 mx-auto max-w-3xl space-y-5" style={{ fontFamily: "'Outfit', 'Sora', sans-serif" }}>
         <div className="text-white" aria-hidden="true" />
 
-        <section className="bg-white/92 rounded-3xl border border-white/70 p-4 shadow-[0_20px_60px_rgba(15,23,42,0.12)]">
+        <section className="bg-transparent rounded-3xl border border-white/70 p-4 shadow-[0_20px_60px_rgba(15,23,42,0.16)]">
           <div className="text-xs font-semibold text-white mb-3">{t('events.upcomingTitle')}</div>
           {loading ? (
             <div className="text-sm text-gray-500">{t('common.loading')}</div>
@@ -273,9 +310,9 @@ export default function EventsPage() {
                 const feedback = feedbackByEventId[event.id];
 
                 return (
-                  <div key={event.id} className="rounded-2xl border border-gray-200/80 bg-white/95 p-3 shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <Link href={`/events/${event.id}`} className="flex min-w-0 flex-1 items-center gap-4">
+                  <div key={event.id} className={upcomingCardClass(event.isMatchPlay)}>
+                    <div className="flex items-start gap-3">
+                      <Link href={`/events/${event.id}`} className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
                         <div className="w-12 shrink-0 text-center">
                           <div className="text-sm font-semibold text-black">{day}</div>
                           <div className="mt-1 rounded-md bg-sky-200 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-black">
@@ -284,11 +321,16 @@ export default function EventsPage() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-semibold text-gray-900 truncate">{event.name}</div>
-                          <div className="text-xs text-gray-500">{formatLabel(event.competition_mode, t)}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
+                            <span>{formatLabel(event.competition_mode, t)}</span>
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusBadgeClass(event.status)}`}>
+                              {formatEventStatus(event.status, t)}
+                            </span>
+                          </div>
                         </div>
                       </Link>
 
-                      <div className="flex shrink-0 flex-col items-end gap-1">
+                      <div className="flex shrink-0 flex-col items-end gap-1.5">
                         {isWaitlist ? (
                           <div className="inline-flex rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
                             {t('events.waitlist')}
@@ -305,7 +347,7 @@ export default function EventsPage() {
                             type="button"
                             onClick={() => setPending(event.id, pending === 'unsubscribe' ? null : 'unsubscribe')}
                             disabled={isBusy}
-                            className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[11px] font-semibold text-rose-700 disabled:opacity-60"
+                            className="rounded-full border border-rose-200 bg-rose-50 px-2.5 sm:px-3 py-1 text-[11px] font-semibold text-rose-700 disabled:opacity-60"
                           >
                             {isBusy ? t('common.loading') : t('events.unregisterCta')}
                           </button>
@@ -314,7 +356,7 @@ export default function EventsPage() {
                             type="button"
                             onClick={() => setPending(event.id, pending === 'subscribe' ? null : 'subscribe')}
                             disabled={isBusy || !user?.id || !event.registrationOpen || isRegistered || isWaitlist}
-                            className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700 disabled:opacity-60"
+                            className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 sm:px-3 py-1 text-[11px] font-semibold text-emerald-700 disabled:opacity-60"
                           >
                             {isBusy
                               ? t('common.loading')
@@ -331,7 +373,7 @@ export default function EventsPage() {
                         <div className="text-[11px] text-slate-700">
                           {pending === 'subscribe' ? t('events.registerConfirm') : t('events.unregisterConfirm')}
                         </div>
-                        <div className="mt-2 flex items-center gap-2">
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
                           <button
                             type="button"
                             onClick={() => void confirmAction(event, pending)}
@@ -394,7 +436,7 @@ export default function EventsPage() {
                   <Link
                     key={event.id}
                     href={`/events/${event.id}`}
-                    className="flex items-center gap-4 rounded-2xl border border-gray-200/80 bg-white/95 p-3 shadow-sm"
+                    className={finishedCardClass()}
                   >
                     <div className="w-12 shrink-0 text-center">
                       <div className="text-sm font-semibold text-black">{day}</div>
@@ -404,7 +446,12 @@ export default function EventsPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-semibold text-gray-900 truncate">{event.name}</div>
-                      <div className="text-xs text-gray-500">{formatLabel(event.competition_mode, t)}</div>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+                        <span>{formatLabel(event.competition_mode, t)}</span>
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusBadgeClass(event.status)}`}>
+                          {formatEventStatus(event.status, t)}
+                        </span>
+                      </div>
                     </div>
                   </Link>
                 );

@@ -62,15 +62,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div
-      className="fixed inset-0 w-screen h-screen overflow-hidden flex items-center justify-center bg-cover bg-center"
-      style={{
-        backgroundImage: 'url(/aereo.jpg)',
-        backgroundAttachment: 'fixed',
-      }}
-    >
-      {/* Overlay gradiente premium */}
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-0"></div>
+    <div className="min-h-screen relative overflow-x-hidden">
+      <div
+        className="pointer-events-none fixed inset-0 z-0"
+        style={{
+          backgroundImage: 'url(/aereo.jpg)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+        }}
+      />
+
+      <div className="pointer-events-none fixed inset-0 bg-black/40 backdrop-blur-sm z-0" />
 
       {/* Header con Selector de Idioma */}
       <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-20">
@@ -78,7 +81,7 @@ export default function LoginPage() {
       </div>
 
       {/* Contenedor principal */}
-      <div className="relative z-10 w-full h-full flex items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
+      <div className="relative z-10 w-full min-h-screen flex items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
         <div className="w-full max-w-md">
           
           {/* Logo Premium */}
